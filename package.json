@@ -1,6 +1,6 @@
 {
   "name": "inktts-workspace",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "description": "INKTTS — Thai batch text-to-speech desktop app",
   "scripts": {
@@ -12,7 +12,13 @@
     "release": "node scripts/release.mjs",
     "verify:release": "node scripts/verify-release.mjs"
   },
-  "keywords": ["electron", "react", "typescript", "tts", "thai"],
+  "keywords": [
+    "electron",
+    "react",
+    "typescript",
+    "tts",
+    "thai"
+  ],
   "author": "INKTTS",
   "license": "MIT",
   "pnpm": {
