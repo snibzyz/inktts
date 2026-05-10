@@ -335,6 +335,9 @@ class ServicePanel(ctk.CTkFrame):
         self.field_vars: dict[str, tk.Variable] = {}
         self._tick_scheduled = False
         self.stop_event: threading.Event | None = None
+        # AdaptiveLimiter feedback — updated by LIMIT events from the script
+        self.current_limit: int | None = None
+        self.initial_limit: int | None = None
 
         self._build()
 
@@ -489,6 +492,10 @@ class ServicePanel(ctk.CTkFrame):
         self.sum_avg.pack(side="left", padx=18)
         self.sum_eta = label(sumi, "", font_size=11, fg=C["text_dim"])
         self.sum_eta.pack(side="left")
+        # Auto-throttle indicator — shrinks visibly when AdaptiveLimiter
+        # halves on consecutive failures, grows back on success streak.
+        self.adapt_lbl = label(sumi, "", font_size=11, fg=C["text_dim"])
+        self.adapt_lbl.pack(side="left", padx=(18, 0))
         self.sum_status = label(sumi, "", font_size=11, fg=C["text_dim"])
         self.sum_status.pack(side="right")
 
@@ -693,6 +700,9 @@ class ServicePanel(ctk.CTkFrame):
         self.start_time = time.time()
         self.running = True
         self.stop_event = threading.Event()
+        self.current_limit = None
+        self.initial_limit = None
+        self.adapt_lbl.configure(text="", text_color=C["text_dim"])
         self.sum_main.configure(text=f"กำลังรัน {len(files)} ไฟล์…", text_color=C["text_bright"])
         if cap_warning:
             self.sum_status.configure(
@@ -786,6 +796,9 @@ class ServicePanel(ctk.CTkFrame):
         self.after(200, self._tick)
 
     def _handle_line(self, line: str):
+        if line.startswith("LIMIT\t"):
+            self._handle_limit_line(line)
+            return
         if not line.startswith("PROG\t"):
             return
         parts = line.split("\t")
@@ -800,6 +813,30 @@ class ServicePanel(ctk.CTkFrame):
             self.rows[base] = FileRow(self.scroll, base, t)
         self.rows[base].update(status, d)
         self.rows[base].tick_elapsed()
+
+    def _handle_limit_line(self, line: str):
+        # Format: LIMIT\t{label}\t{shrink|grow}\t{old}\t{new}\t{initial}
+        parts = line.split("\t")
+        if len(parts) < 6:
+            return
+        try:
+            _, _label, kind, _old, new, initial = parts[:6]
+            new_n = int(new)
+            init_n = int(initial)
+        except ValueError:
+            return
+        self.current_limit = new_n
+        self.initial_limit = init_n
+        if kind == "shrink":
+            self.adapt_lbl.configure(
+                text=f"⚠ auto-throttle: {new_n}/{init_n}",
+                text_color=C["warn"],
+            )
+            self.on_status(f"โดน rate-limit — ปรับลงเป็น {new_n}/{init_n}", "warn")
+        elif kind == "grow":
+            color = C["ok"] if new_n >= init_n else C["text_dim"]
+            label_text = "✓ คืนเพดานเต็ม" if new_n >= init_n else f"↑ ค่อย ๆ เพิ่มกลับ: {new_n}/{init_n}"
+            self.adapt_lbl.configure(text=label_text, text_color=color)
 
     def _refresh_summary(self):
         finished = [r for r in self.rows.values() if r.is_finished]

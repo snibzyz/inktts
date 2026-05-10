@@ -44,6 +44,82 @@ def emit_progress(file_base, status, chunks_done, chunks_total):
     print(f"PROG\t{file_base}\t{status}\t{chunks_done}\t{chunks_total}", flush=True)
 
 
+def emit_limit(label, kind, old, new, initial):
+    """Emit a structured LIMIT line that the UI parses. Used by AdaptiveLimiter
+    to surface auto-throttle decisions in the GUI.
+    """
+    print(f"LIMIT\t{label}\t{kind}\t{old}\t{new}\t{initial}", flush=True)
+
+
+class AdaptiveLimiter:
+    """asyncio.Semaphore-compatible limiter that auto-shrinks on consecutive
+    failures and gradually restores the cap during sustained success.
+
+    Why: fixed concurrency caps (set from the preset slider) are right when
+    the API is healthy, but if we hit a 429 / WebSocket throttle / empty
+    response burst, the *current run* should back off without the user
+    having to stop and re-pick a safer preset. We track outcomes per chunk;
+    after `fail_threshold` consecutive failures (post-retry) we halve the
+    active cap (down to `minimum`). After `recover_threshold` consecutive
+    successes we add one slot back, never exceeding the original.
+
+    The limiter emits structured `LIMIT` lines when shrinking/growing so the
+    UI can show "auto: 5/20" instead of silently slowing down.
+
+    Used as `async with limiter: ...` — same call sites as `asyncio.Semaphore`.
+    Outcome reporting via `await limiter.report_outcome(ok=True/False)` after
+    each fetch (success path *and* exception path).
+    """
+
+    def __init__(self, initial, minimum=1, fail_threshold=3, recover_threshold=10, label="total"):
+        self._initial = max(1, int(initial))
+        self._max = self._initial
+        self._min = max(1, int(minimum))
+        self._fail_thr = fail_threshold
+        self._recover_thr = recover_threshold
+        self._label = label
+        self._in_use = 0
+        self._fails = 0
+        self._oks = 0
+        self._cond = asyncio.Condition()
+
+    @property
+    def current_max(self):
+        return self._max
+
+    async def __aenter__(self):
+        async with self._cond:
+            while self._in_use >= self._max:
+                await self._cond.wait()
+            self._in_use += 1
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        async with self._cond:
+            self._in_use -= 1
+            self._cond.notify(1)
+
+    async def report_outcome(self, ok):
+        async with self._cond:
+            if ok:
+                self._fails = 0
+                self._oks += 1
+                if self._oks >= self._recover_thr and self._max < self._initial:
+                    old = self._max
+                    self._max = min(self._initial, self._max + 1)
+                    self._oks = 0
+                    emit_limit(self._label, "grow", old, self._max, self._initial)
+                    self._cond.notify(1)
+            else:
+                self._oks = 0
+                self._fails += 1
+                if self._fails >= self._fail_thr and self._max > self._min:
+                    old = self._max
+                    self._max = max(self._min, self._max // 2)
+                    self._fails = 0
+                    emit_limit(self._label, "shrink", old, self._max, self._initial)
+
+
 def split_lines(text, lines_per_chunk):
     """Group N non-empty lines per chunk; merge any chunk with no synthesizable
     letters (e.g. only '…' or '—') into the previous one."""
@@ -245,16 +321,24 @@ async def synth_one_file(file_state, args, fetch_fn, stats, total_connections):
     async def fetch_one(chunk_idx):
         chunk_path = file_state["chunk_paths"][chunk_idx]
         if not (os.path.exists(chunk_path) and os.path.getsize(chunk_path) > 1024):
+            ok = False
             try:
                 async with file_sem, total_connections:
                     await fetch_with_retry(file_state["chunks"][chunk_idx], chunk_path, fetch_fn, args)
+                ok = True
             except Exception:
                 failed_chunks.append(chunk_idx)
                 file_state["remaining"] -= 1
                 done = total - file_state["remaining"]
                 emit_progress(file_state["base"], "WORK", done, total)
+                # Feed the outcome to the adaptive limiter so consecutive fails
+                # shrink the effective concurrency cap for the rest of the run.
+                if hasattr(total_connections, "report_outcome"):
+                    await total_connections.report_outcome(False)
                 maybe_finalize()
                 return
+            if hasattr(total_connections, "report_outcome"):
+                await total_connections.report_outcome(ok)
         stats.chunks_done += 1
         file_state["remaining"] -= 1
         done = total - file_state["remaining"]
@@ -305,7 +389,7 @@ async def run_batch(args, fetch_fn, split_fn):
         stats.failure_log.write("path\terror\n")
 
     file_states = [s for s in (prepare_file(p, args, stats, split_fn) for p in files) if s]
-    total_sem = asyncio.Semaphore(total_conn)
+    total_sem = AdaptiveLimiter(initial=total_conn, label="total")
     file_slot_sem = asyncio.Semaphore(args.batch_size)
 
     async def synth_with_slot(file_state):
