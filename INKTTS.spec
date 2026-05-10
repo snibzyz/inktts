@@ -39,6 +39,7 @@ a = Analysis(
         ('scripts/edge.py', 'scripts'),
         ('scripts/google.py', 'scripts'),
         ('scripts/responsivevoice.py', 'scripts'),
+        ('scripts/merge_groups.py', 'scripts'),
         ('scripts/_lib.py', 'scripts'),
         ('inktts.ico', '.'),
     ] + ctk_datas + edge_datas,

@@ -23,6 +23,7 @@ import time
 import tkinter as tk
 import warnings
 from pathlib import Path
+from tkinter import filedialog
 
 import customtkinter as ctk
 
@@ -145,25 +146,25 @@ FONT = "Tahoma"
 
 # ─── Service definitions ─────────────────────────────────────────────────────
 EDGE_PRESETS = [
-    ("⚡ 1 ไฟล์เร็วสุด", 1, 48),
-    ("👥 5 ไฟล์เสร็จพร้อมกัน", 5, 8),
-    ("⭐ 10 ไฟล์เสร็จพร้อมกัน (แนะนำ)", 10, 2),
-    ("👥 20 ไฟล์เสร็จพร้อมกัน", 20, 2),
-    ("👥 50 ไฟล์เสร็จพร้อมกัน", 50, 1),
-    ("🛡 ปลอดภัย (กัน throttle)", 4, 1),
+    ("⚡ ไฟล์เดียว — เร็วสุด", 1, 48),
+    ("👥 ไม่กี่ไฟล์ (5 ไฟล์)", 5, 8),
+    ("⭐ แนะนำ — เร็วและคุ้ม (10 ไฟล์)", 10, 2),
+    ("🚀 ไฟล์เยอะ (20 ไฟล์)", 20, 2),
+    ("🚀 ไฟล์เยอะมาก (50 ไฟล์)", 50, 1),
+    ("🛡 ช้าแต่ปลอดภัย (กันโดน rate-limit)", 4, 1),
 ]
 GOOGLE_PRESETS = [
-    ("⚡ 1 ไฟล์เร็วสุด", 1, 6),
-    ("⭐ 10 ไฟล์เสร็จพร้อมกัน (แนะนำ)", 10, 2),
-    ("👥 6 ไฟล์เสร็จพร้อมกัน", 6, 1),
-    ("👥 8 ไฟล์เสร็จพร้อมกัน", 8, 1),
-    ("🛡 ปลอดภัย", 4, 1),
+    ("⚡ ไฟล์เดียว — เร็วสุด", 1, 6),
+    ("⭐ แนะนำ — เร็วและคุ้ม (10 ไฟล์)", 10, 2),
+    ("👥 ไม่กี่ไฟล์ (6 ไฟล์)", 6, 1),
+    ("👥 ไม่กี่ไฟล์ (8 ไฟล์)", 8, 1),
+    ("🛡 ช้าแต่ปลอดภัย", 4, 1),
 ]
 RV_PRESETS = [
-    ("⚡ 1 ไฟล์เร็วสุด", 1, 6),
-    ("⭐ 8 ไฟล์เสร็จพร้อมกัน (แนะนำ)", 8, 1),
-    ("👥 6 ไฟล์เสร็จพร้อมกัน", 6, 1),
-    ("🛡 ปลอดภัย", 3, 1),
+    ("⚡ ไฟล์เดียว — เร็วสุด", 1, 6),
+    ("⭐ แนะนำ (8 ไฟล์)", 8, 1),
+    ("👥 ไม่กี่ไฟล์ (6 ไฟล์)", 6, 1),
+    ("🛡 ช้าแต่ปลอดภัย", 3, 1),
 ]
 
 SERVICES = [
@@ -181,10 +182,11 @@ SERVICES = [
         "default_preset": 2,
         "fields": [
             {"name": "voice", "kind": "combo", "label": "เสียงพากย์", "default": "th-TH-PremwadeeNeural",
-             "options": ["th-TH-PremwadeeNeural", "th-TH-NiwatNeural"]},
-            {"name": "rate", "kind": "entry", "label": "ความเร็ว", "default": "+30%"},
-            {"name": "lines-per-chunk", "kind": "spinbox", "label": "บรรทัด/ส่วน", "default": 1,
-             "from_": 1, "to": 50},
+             "options": ["th-TH-PremwadeeNeural", "th-TH-NiwatNeural"],
+             "option_labels": ["คุณป้อม (เสียงผู้หญิง)", "คุณนิวัฒน์ (เสียงผู้ชาย)"]},
+            {"name": "rate", "kind": "entry", "label": "ความเร็วเสียง (เช่น +30%)", "default": "+30%"},
+            {"name": "lines-per-chunk", "kind": "spinbox", "label": "บรรทัด/ส่วนของเสียง", "default": 1,
+             "from_": 1, "to": 50, "advanced": True},
         ],
     },
     {
@@ -201,10 +203,10 @@ SERVICES = [
         "fields": [
             {"name": "tempo", "kind": "scale", "label": "ความเร็วเสียง", "default": 1.3,
              "from_": 0.5, "to": 2.0},
-            {"name": "chunk-chars", "kind": "spinbox", "label": "ตัวอักษร/ส่วน", "default": 120,
-             "from_": 50, "to": 200},
-            {"name": "jitter", "kind": "scale", "label": "หน่วงสุ่ม", "default": 0.1,
-             "from_": 0.0, "to": 1.0},
+            {"name": "chunk-chars", "kind": "spinbox", "label": "ตัวอักษร/ส่วน",
+             "default": 120, "from_": 50, "to": 200, "advanced": True},
+            {"name": "jitter", "kind": "scale", "label": "หน่วงสุ่ม (กันโดน rate-limit)",
+             "default": 0.1, "from_": 0.0, "to": 1.0, "advanced": True},
         ],
     },
     {
@@ -220,11 +222,12 @@ SERVICES = [
         "default_preset": 1,
         "fields": [
             {"name": "gender", "kind": "combo", "label": "เพศของเสียง", "default": "female",
-             "options": ["female", "male"]},
+             "options": ["female", "male"],
+             "option_labels": ["เสียงผู้หญิง", "เสียงผู้ชาย"]},
             {"name": "tempo", "kind": "scale", "label": "ความเร็วเสียง", "default": 1.3,
              "from_": 0.5, "to": 2.0},
-            {"name": "chunk-chars", "kind": "spinbox", "label": "ตัวอักษร/ส่วน", "default": 100,
-             "from_": 50, "to": 100},
+            {"name": "chunk-chars", "kind": "spinbox", "label": "ตัวอักษร/ส่วน",
+             "default": 100, "from_": 50, "to": 100, "advanced": True},
         ],
     },
 ]
@@ -365,20 +368,57 @@ class ServicePanel(ctk.CTkFrame):
               fg=C["text_bright"]).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 10))
 
         r = 1
-        # Input pattern
-        label(cfgi, "โฟลเดอร์ไฟล์เข้า").grid(row=r, column=0, sticky="w", pady=4)
+        # ── Input section: browse buttons + auto-detected file count ────────
+        # pattern_var holds either a glob (folder mode) or a sentinel string
+        # (file-list mode). selected_files (when set) bypasses glob entirely.
         self.pattern_var = tk.StringVar(value=str(INPUT_DIR / "*.txt"))
-        ent = self._entry(cfgi, self.pattern_var)
-        ent.grid(row=r, column=1, sticky="we", padx=(10, 8), pady=4)
-        self.count_lbl = label(cfgi, "0 ไฟล์", font_size=11, fg=C["text_dim"])
-        self.count_lbl.grid(row=r, column=2, sticky="w", pady=4)
-        self.pattern_var.trace_add("write", lambda *_: self._refresh_count())
+        self.selected_files: list[str] | None = None
+
+        label(cfgi, "ไฟล์ที่จะแปลง", font_size=12, weight="bold",
+              fg=C["text_bright"]).grid(row=r, column=0, sticky="w", pady=(0, 4))
 
         r += 1
-        label(cfgi, "จำนวนไฟล์ (0 = ทั้งหมด)").grid(row=r, column=0, sticky="w", pady=4)
+        browse_row = ctk.CTkFrame(cfgi, fg_color="transparent")
+        browse_row.grid(row=r, column=0, columnspan=4, sticky="we", pady=4)
+        ctk.CTkButton(
+            browse_row, text="📁 เลือกโฟลเดอร์", command=self._browse_folder,
+            width=160, height=32, corner_radius=4,
+            font=(FONT, 12, "bold"),
+            fg_color=C["panel_hi"], hover_color=C["selected"],
+            text_color=C["text"], border_width=1, border_color=C["border_input"],
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(
+            browse_row, text="📄 เลือกไฟล์ (เลือกได้หลายไฟล์)", command=self._browse_files,
+            width=240, height=32, corner_radius=4,
+            font=(FONT, 12),
+            fg_color=C["panel_hi"], hover_color=C["selected"],
+            text_color=C["text"], border_width=1, border_color=C["border_input"],
+        ).pack(side="left")
+
+        r += 1
+        # Selected target — readable summary, click to edit raw pattern
+        self.input_summary = label(cfgi, "", font_size=11, fg=C["text_dim"])
+        self.input_summary.grid(row=r, column=0, columnspan=4, sticky="w", pady=(2, 4))
+
+        r += 1
+        # Limit — friendly checkbox + spinbox combo
+        limit_row = ctk.CTkFrame(cfgi, fg_color="transparent")
+        limit_row.grid(row=r, column=0, columnspan=4, sticky="w", pady=4)
+        self.limit_all_var = tk.BooleanVar(value=False)
         self.n_files_var = tk.IntVar(value=10)
-        sp = self._spinbox(cfgi, self.n_files_var, 0, 10000)
-        sp.grid(row=r, column=1, sticky="w", padx=(10, 0), pady=4)
+        chk = ctk.CTkCheckBox(
+            limit_row, text="แปลงทุกไฟล์", variable=self.limit_all_var,
+            command=self._toggle_limit_all,
+            font=(FONT, 12),
+            fg_color=C["accent_btn"], hover_color=C["accent_btn_hi"],
+            border_color=C["border_input"], text_color=C["text"],
+        )
+        chk.pack(side="left", padx=(0, 12))
+        self._limit_lbl = label(limit_row, "หรือเลือกแค่", font_size=11, fg=C["text_dim"])
+        self._limit_lbl.pack(side="left", padx=(0, 6))
+        self._limit_spin = self._spinbox(limit_row, self.n_files_var, 1, 10000)
+        self._limit_spin.pack(side="left")
+        label(limit_row, "ไฟล์แรก", font_size=11, fg=C["text_dim"]).pack(side="left", padx=(6, 0))
 
         r += 1
         # Preset
@@ -400,57 +440,106 @@ class ServicePanel(ctk.CTkFrame):
         )
         self.preset_cb.grid(row=r, column=1, columnspan=2, sticky="w", padx=(10, 0), pady=4)
 
+        # Basic service-specific fields (voice / gender / tempo / rate)
+        # Placed inline; advanced fields (chunk-chars, jitter, lines-per-chunk)
+        # go to the collapsible "ตั้งค่าขั้นสูง" section below.
         r += 1
-        # Batch slider
+        hairline(cfgi).grid(row=r, column=0, columnspan=4, sticky="we", pady=10)
         cap = self.service["max_total"]
-        label(cfgi, "จำนวนไฟล์ต่อรอบ").grid(row=r, column=0, sticky="w", pady=(8, 4))
         b_default = self.service["presets"][self.service["default_preset"]][1]
+        c_default = self.service["presets"][self.service["default_preset"]][2]
         self.batch_var = tk.IntVar(value=b_default)
+        self.conn_var = tk.IntVar(value=c_default)
+
+        for fdef in self.service["fields"]:
+            if fdef.get("advanced"):
+                continue
+            r += 1
+            label(cfgi, fdef["label"]).grid(row=r, column=0, sticky="w", pady=4)
+            self._build_field(cfgi, fdef, r)
+
+        # Advanced section — collapsible (default hidden). Holds the
+        # technical knobs most non-tech users shouldn't need to touch:
+        # batch size, connections-per-file, total-conn indicator, and
+        # per-service advanced fields (chunk-chars, jitter, lines-per-chunk).
+        r += 1
+        hairline(cfgi).grid(row=r, column=0, columnspan=4, sticky="we", pady=12)
+        r += 1
+        self.adv_open = tk.BooleanVar(value=False)
+        self.adv_toggle_btn = ctk.CTkButton(
+            cfgi, text="▸  ตั้งค่าขั้นสูง (สำหรับผู้ใช้ที่ต้องการปรับ)",
+            command=self._toggle_advanced,
+            anchor="w",
+            height=28, corner_radius=4,
+            font=(FONT, 11),
+            fg_color="transparent", hover_color=C["panel_hi"],
+            text_color=C["text_dim"], border_width=0,
+        )
+        self.adv_toggle_btn.grid(row=r, column=0, columnspan=4, sticky="w", pady=(0, 4))
+
+        r += 1
+        # Inner frame holds advanced widgets; we hide/show by grid_remove/grid
+        self.adv_frame = ctk.CTkFrame(cfgi, fg_color="transparent")
+        self.adv_frame.grid(row=r, column=0, columnspan=4, sticky="we", pady=(0, 4))
+        self.adv_frame.grid_columnconfigure(1, weight=1)
+        self.adv_frame.grid_remove()  # hidden by default
+
+        ar = 0
+        label(self.adv_frame, "จำนวนไฟล์ต่อรอบ").grid(row=ar, column=0, sticky="w", pady=4)
         self.batch_slider = ctk.CTkSlider(
-            cfgi, from_=1, to=cap, number_of_steps=cap - 1,
+            self.adv_frame, from_=1, to=cap, number_of_steps=cap - 1,
             command=lambda v: self._slider_changed(self.batch_var, self.batch_lbl, v),
             progress_color=C["accent"], fg_color=C["track"],
             button_color=C["text"], button_hover_color=C["text_bright"],
             height=14,
         )
         self.batch_slider.set(b_default)
-        self.batch_slider.grid(row=r, column=1, sticky="we", padx=(10, 8), pady=(8, 4))
-        self.batch_lbl = label(cfgi, str(b_default), font_size=12, weight="bold",
+        self.batch_slider.grid(row=ar, column=1, sticky="we", padx=(10, 8), pady=4)
+        self.batch_lbl = label(self.adv_frame, str(b_default), font_size=12, weight="bold",
                                fg=C["text_bright"])
-        self.batch_lbl.grid(row=r, column=2, sticky="w", pady=(8, 4))
+        self.batch_lbl.grid(row=ar, column=2, sticky="w", pady=4)
 
-        r += 1
-        label(cfgi, "การเชื่อมต่อต่อไฟล์").grid(row=r, column=0, sticky="w", pady=4)
-        c_default = self.service["presets"][self.service["default_preset"]][2]
-        self.conn_var = tk.IntVar(value=c_default)
+        ar += 1
+        label(self.adv_frame, "การเชื่อมต่อต่อไฟล์").grid(row=ar, column=0, sticky="w", pady=4)
         self.conn_slider = ctk.CTkSlider(
-            cfgi, from_=1, to=cap, number_of_steps=cap - 1,
+            self.adv_frame, from_=1, to=cap, number_of_steps=cap - 1,
             command=lambda v: self._slider_changed(self.conn_var, self.conn_lbl, v),
             progress_color=C["accent"], fg_color=C["track"],
             button_color=C["text"], button_hover_color=C["text_bright"],
             height=14,
         )
         self.conn_slider.set(c_default)
-        self.conn_slider.grid(row=r, column=1, sticky="we", padx=(10, 8), pady=4)
-        self.conn_lbl = label(cfgi, str(c_default), font_size=12, weight="bold",
+        self.conn_slider.grid(row=ar, column=1, sticky="we", padx=(10, 8), pady=4)
+        self.conn_lbl = label(self.adv_frame, str(c_default), font_size=12, weight="bold",
                               fg=C["text_bright"])
-        self.conn_lbl.grid(row=r, column=2, sticky="w", pady=4)
+        self.conn_lbl.grid(row=ar, column=2, sticky="w", pady=4)
 
-        r += 1
-        self.total_lbl = label(cfgi, "", font_size=11, fg=C["text_dim"])
-        self.total_lbl.grid(row=r, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        ar += 1
+        self.total_lbl = label(self.adv_frame, "", font_size=11, fg=C["text_dim"])
+        self.total_lbl.grid(row=ar, column=0, columnspan=4, sticky="w", pady=(2, 6))
 
-        # Service-specific fields
-        r += 1
-        hairline(cfgi).grid(row=r, column=0, columnspan=4, sticky="we", pady=10)
+        # Advanced service-specific fields
         for fdef in self.service["fields"]:
-            r += 1
-            label(cfgi, fdef["label"]).grid(row=r, column=0, sticky="w", pady=4)
-            self._build_field(cfgi, fdef, r)
+            if not fdef.get("advanced"):
+                continue
+            ar += 1
+            label(self.adv_frame, fdef["label"]).grid(row=ar, column=0, sticky="w", pady=4)
+            self._build_field(self.adv_frame, fdef, ar)
+        # Re-use grid weights so sliders expand
+        self.adv_frame.grid_columnconfigure(1, weight=1)
+        self.adv_frame.grid_columnconfigure(2, weight=0)
 
         # Run controls
         r += 1
         hairline(cfgi).grid(row=r, column=0, columnspan=4, sticky="we", pady=12)
+        # Output destination — non-tech users want to know where the .m4a files go
+        r += 1
+        out_path = (APP_ROOT / self.service["output"]).resolve()
+        label(
+            cfgi,
+            f"🎵 ไฟล์เสียงจะอยู่ที่:  {out_path}",
+            font_size=11, fg=C["text_dim"],
+        ).grid(row=r, column=0, columnspan=4, sticky="w", pady=(0, 8))
         r += 1
         ctrl = ctk.CTkFrame(cfgi, fg_color="transparent")
         ctrl.grid(row=r, column=0, columnspan=4, sticky="w")
@@ -557,9 +646,25 @@ class ServicePanel(ctk.CTkFrame):
 
     def _build_field(self, parent, fdef, r):
         if fdef["kind"] == "combo":
-            v = tk.StringVar(value=str(fdef["default"]))
+            # If option_labels is provided, the dropdown shows friendly labels
+            # (e.g. "คุณป้อม (เสียงผู้หญิง)") but field_vars[name] holds the
+            # underlying CLI value (e.g. "th-TH-PremwadeeNeural").
+            options = fdef["options"]
+            display = fdef.get("option_labels") or options
+            default_idx = options.index(fdef["default"]) if fdef["default"] in options else 0
+            display_var = tk.StringVar(value=display[default_idx])
+            value_var = tk.StringVar(value=fdef["default"])
+
+            def on_pick(label_picked, _opts=options, _disp=display, _vv=value_var):
+                try:
+                    _vv.set(_opts[_disp.index(label_picked)])
+                except ValueError:
+                    _vv.set(label_picked)
+
+            display_var.trace_add("write", lambda *_, vd=display_var: on_pick(vd.get()))
+
             cb = ctk.CTkComboBox(
-                parent, values=fdef["options"], variable=v, state="readonly",
+                parent, values=display, variable=display_var, state="readonly",
                 width=260, height=30, font=(FONT, 12),
                 dropdown_font=(FONT, 12),
                 fg_color=C["input"], border_color=C["border_input"], button_color=C["panel_hi"],
@@ -568,7 +673,7 @@ class ServicePanel(ctk.CTkFrame):
                 dropdown_hover_color=C["selected"],
             )
             cb.grid(row=r, column=1, columnspan=2, sticky="w", padx=(10, 0), pady=4)
-            self.field_vars[fdef["name"]] = v
+            self.field_vars[fdef["name"]] = value_var
         elif fdef["kind"] == "scale":
             v = tk.StringVar(value=f"{float(fdef['default']):.2f}")
             box = ctk.CTkFrame(parent, fg_color="transparent")
@@ -609,12 +714,89 @@ class ServicePanel(ctk.CTkFrame):
         lbl.configure(text=str(i))
         self._update_total()
 
-    def _refresh_count(self):
+    def _resolve_input_files(self) -> list[str]:
+        """Return the list of files start() will process — selected_files
+        (Browse Files mode) takes precedence over the glob pattern."""
+        if self.selected_files:
+            return [f for f in self.selected_files if os.path.exists(f)]
         try:
-            n = len(glob.glob(self.pattern_var.get()))
-            self.count_lbl.configure(text=f"{n} ไฟล์")
+            return sorted(glob.glob(self.pattern_var.get()))
         except Exception:
-            self.count_lbl.configure(text="?")
+            return []
+
+    def _refresh_count(self):
+        files = self._resolve_input_files()
+        n = len(files)
+        if self.selected_files is not None:
+            # File-list mode — show a sample of names for clarity
+            names = [os.path.basename(f) for f in files[:3]]
+            tail = ", …" if n > 3 else ""
+            summary = (f"📄 {n} ไฟล์ที่เลือก: {', '.join(names)}{tail}"
+                       if n else "⚠ ไฟล์ที่เลือกไว้หายไปแล้ว — เลือกใหม่อีกครั้ง")
+            color = C["text_dim"] if n else C["fail"]
+        elif n:
+            folder = os.path.dirname(self.pattern_var.get()) or "."
+            summary = f"📁 พบ {n} ไฟล์ใน {folder}"
+            color = C["text_dim"]
+        else:
+            summary = (f"⚠ ไม่พบไฟล์ .txt ใน {self.pattern_var.get()} "
+                       f"— กดปุ่มเลือกข้างบน")
+            color = C["warn"]
+        self.input_summary.configure(text=summary, text_color=color)
+
+    def _browse_folder(self):
+        initial = str(INPUT_DIR if INPUT_DIR.exists() else APP_ROOT)
+        folder = filedialog.askdirectory(
+            initialdir=initial,
+            title="เลือกโฟลเดอร์ที่มีไฟล์ .txt ที่จะแปลงเสียง",
+        )
+        if not folder:
+            return
+        self.selected_files = None
+        self.pattern_var.set(str(Path(folder) / "*.txt"))
+        self._refresh_count()
+
+    def _browse_files(self):
+        initial = str(INPUT_DIR if INPUT_DIR.exists() else APP_ROOT)
+        files = filedialog.askopenfilenames(
+            initialdir=initial,
+            title="เลือกไฟล์ .txt (กด Ctrl/Shift เพื่อเลือกหลายไฟล์)",
+            filetypes=[("ไฟล์ข้อความ (.txt)", "*.txt"), ("ทุกไฟล์", "*.*")],
+        )
+        if not files:
+            return
+        self.selected_files = list(files)
+        # Show a friendly placeholder in pattern_var so the entry isn't blank,
+        # but the actual processing path is selected_files.
+        self.pattern_var.set(f"({len(files)} ไฟล์ที่เลือก)")
+        self._refresh_count()
+
+    def _toggle_limit_all(self):
+        on = self.limit_all_var.get()
+        # Dim the spinbox when "แปลงทุกไฟล์" is checked
+        for child in self._limit_spin.winfo_children():
+            try:
+                child.configure(state="disabled" if on else "normal")
+            except tk.TclError:
+                pass
+        self._limit_lbl.configure(text_color=C["text_muted"] if on else C["text_dim"])
+
+    def _toggle_advanced(self):
+        """Show/hide the advanced settings frame and rotate the toggle arrow."""
+        opening = not self.adv_open.get()
+        self.adv_open.set(opening)
+        if opening:
+            self.adv_frame.grid()
+            self.adv_toggle_btn.configure(
+                text="▾  ตั้งค่าขั้นสูง (คลิกเพื่อซ่อน)",
+                text_color=C["text"],
+            )
+        else:
+            self.adv_frame.grid_remove()
+            self.adv_toggle_btn.configure(
+                text="▸  ตั้งค่าขั้นสูง (สำหรับผู้ใช้ที่ต้องการปรับ)",
+                text_color=C["text_dim"],
+            )
 
     def _apply_preset(self, _label=None):
         idx = self.preset_cb.cget("values").index(self.preset_var.get())
@@ -655,13 +837,15 @@ class ServicePanel(ctk.CTkFrame):
     def start(self):
         if self.running:
             return
-        files = sorted(glob.glob(self.pattern_var.get()))
-        try:
-            n = int(self.n_files_var.get())
-        except (ValueError, tk.TclError):
-            n = 0
-        if n > 0:
-            files = files[:n]
+        files = self._resolve_input_files()
+        # "แปลงทุกไฟล์" = no limit; otherwise honor the spinbox count
+        if not self.limit_all_var.get():
+            try:
+                n = int(self.n_files_var.get())
+            except (ValueError, tk.TclError):
+                n = 0
+            if n > 0:
+                files = files[:n]
         if not files:
             self.sum_status.configure(text="ไม่พบไฟล์ตามรูปแบบที่ระบุ", text_color=C["fail"])
             self.on_status("ไม่พบไฟล์ตามรูปแบบที่ระบุ", "fail")
@@ -874,6 +1058,416 @@ class ServicePanel(ctk.CTkFrame):
         self.running = False
 
 
+# ─── MergePanel — รวมไฟล์ .m4a เป็นกลุ่มย่อย ────────────────────────────────
+import re
+
+NUMBERED_RE = re.compile(r"^(.*?)(\d+)$")
+
+
+def detect_prefix_range(folder: Path, ext: str = "m4a"):
+    """Scan folder for files like '<prefix><number>.<ext>' and infer the
+    common prefix + numeric range. Returns (prefix, start, end, count) or
+    (None, None, None, 0) if no consistent pattern is found.
+    """
+    if not folder.exists() or not folder.is_dir():
+        return (None, None, None, 0)
+    nums_by_prefix: dict[str, list[int]] = {}
+    for p in folder.glob(f"*.{ext}"):
+        stem = p.stem
+        m = NUMBERED_RE.match(stem)
+        if not m:
+            continue
+        prefix, num_str = m.group(1), m.group(2)
+        try:
+            n = int(num_str)
+        except ValueError:
+            continue
+        nums_by_prefix.setdefault(prefix, []).append(n)
+    if not nums_by_prefix:
+        return (None, None, None, 0)
+    # Pick the prefix with the most matching files
+    prefix, nums = max(nums_by_prefix.items(), key=lambda kv: len(kv[1]))
+    nums.sort()
+    return (prefix, nums[0], nums[-1], len(nums))
+
+
+class MergePanel(ctk.CTkFrame):
+    """Group-merge .m4a files via ffmpeg concat (no re-encode = fast).
+
+    Common workflow: user generated chapters 401-600 individually; wants
+    grouped audiobook files (401-410.m4a, 411-420.m4a, …). This panel
+    auto-detects the numbered pattern in a source folder and runs
+    scripts/merge_groups.py in-process.
+    """
+
+    def __init__(self, parent, on_status):
+        super().__init__(parent, fg_color=C["bg"])
+        self.on_status = on_status
+        self.running = False
+        self.event_q: queue.Queue = queue.Queue()
+        self.start_time: float | None = None
+        self._tick_scheduled = False
+        self._build()
+
+    def _build(self):
+        # Title
+        head = ctk.CTkFrame(self, fg_color="transparent")
+        head.pack(fill="x", padx=24, pady=(20, 6))
+        label(head, "🔀 รวมไฟล์เสียงเป็นกลุ่มย่อย", font_size=18, weight="bold",
+              fg=C["text_bright"]).pack(anchor="w")
+        label(head, "เช่น มีตอน 401-600 → รวมเป็นไฟล์ 401-410, 411-420, … (ไฟล์ละ 10 ตอน)",
+              font_size=12, fg=C["text_dim"]).pack(anchor="w", pady=(2, 0))
+        hairline(self).pack(fill="x", padx=24, pady=(10, 14))
+
+        # Configuration card
+        cfg = ctk.CTkFrame(self, fg_color=C["panel"], corner_radius=6, border_width=1,
+                           border_color=C["border"])
+        cfg.pack(fill="x", padx=24)
+        f = ctk.CTkFrame(cfg, fg_color="transparent")
+        f.pack(fill="x", padx=18, pady=16)
+        f.grid_columnconfigure(1, weight=1)
+
+        label(f, "ตั้งค่าการรวม", font_size=13, weight="bold",
+              fg=C["text_bright"]).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 10))
+
+        r = 1
+        # Source folder
+        label(f, "โฟลเดอร์ต้นทาง (ไฟล์ .m4a)", font_size=12, weight="bold",
+              fg=C["text_bright"]).grid(row=r, column=0, sticky="w", pady=4)
+        r += 1
+        src_row = ctk.CTkFrame(f, fg_color="transparent")
+        src_row.grid(row=r, column=0, columnspan=4, sticky="we", pady=4)
+        self.src_var = tk.StringVar(value=str(APP_ROOT / "output" / "edge"))
+        ctk.CTkButton(
+            src_row, text="📁 เลือกโฟลเดอร์", command=self._browse_src,
+            width=160, height=32, corner_radius=4,
+            font=(FONT, 12, "bold"),
+            fg_color=C["panel_hi"], hover_color=C["selected"],
+            text_color=C["text"], border_width=1, border_color=C["border_input"],
+        ).pack(side="left", padx=(0, 8))
+        self.src_lbl = label(src_row, self.src_var.get(), font_size=11, fg=C["text_dim"])
+        self.src_lbl.pack(side="left")
+
+        r += 1
+        self.detected_lbl = label(f, "", font_size=11, fg=C["text_dim"])
+        self.detected_lbl.grid(row=r, column=0, columnspan=4, sticky="w", pady=(2, 6))
+
+        r += 1
+        hairline(f).grid(row=r, column=0, columnspan=4, sticky="we", pady=10)
+
+        # Prefix
+        r += 1
+        label(f, "คำนำหน้าชื่อไฟล์").grid(row=r, column=0, sticky="w", pady=4)
+        self.prefix_var = tk.StringVar(value="")
+        e = ctk.CTkEntry(
+            f, textvariable=self.prefix_var, height=30, corner_radius=4,
+            font=(FONT, 12),
+            fg_color=C["input"], border_color=C["border_input"], text_color=C["text"],
+            placeholder_text="เช่น  ติดหนี้สามสิบล้าน  (เว้นวรรคก่อนเลขตอน)",
+            placeholder_text_color=C["text_muted"],
+        )
+        e.grid(row=r, column=1, columnspan=3, sticky="we", padx=(10, 0), pady=4)
+
+        # Range
+        r += 1
+        label(f, "ตั้งแต่ตอน — ถึงตอน").grid(row=r, column=0, sticky="w", pady=4)
+        rng_row = ctk.CTkFrame(f, fg_color="transparent")
+        rng_row.grid(row=r, column=1, columnspan=3, sticky="w", padx=(10, 0), pady=4)
+        self.start_var = tk.IntVar(value=1)
+        self.end_var = tk.IntVar(value=10)
+        for var, label_text in ((self.start_var, "ถึง"), (self.end_var, "")):
+            sb = self._spinbox(rng_row, var, 0, 999999)
+            sb.pack(side="left", padx=(0, 8))
+            if label_text:
+                label(rng_row, label_text, font_size=12, fg=C["text_dim"]).pack(side="left",
+                                                                                padx=(0, 8))
+
+        # Group size
+        r += 1
+        label(f, "จัดกลุ่มละ (ตอน)").grid(row=r, column=0, sticky="w", pady=4)
+        self.group_var = tk.IntVar(value=10)
+        self._spinbox(f, self.group_var, 1, 1000).grid(row=r, column=1, sticky="w",
+                                                       padx=(10, 0), pady=4)
+
+        # Extension
+        r += 1
+        label(f, "นามสกุล").grid(row=r, column=0, sticky="w", pady=4)
+        self.ext_var = tk.StringVar(value="m4a")
+        ctk.CTkComboBox(
+            f, values=["m4a", "mp3"], variable=self.ext_var, state="readonly",
+            width=120, height=30, font=(FONT, 12), dropdown_font=(FONT, 12),
+            fg_color=C["input"], border_color=C["border_input"], button_color=C["panel_hi"],
+            button_hover_color=C["selected"], dropdown_fg_color=C["input"],
+            dropdown_text_color=C["text"], text_color=C["text"],
+            dropdown_hover_color=C["selected"],
+        ).grid(row=r, column=1, sticky="w", padx=(10, 0), pady=4)
+
+        # Preview
+        r += 1
+        hairline(f).grid(row=r, column=0, columnspan=4, sticky="we", pady=10)
+        r += 1
+        self.preview_lbl = label(f, "", font_size=11, fg=C["text_dim"])
+        self.preview_lbl.grid(row=r, column=0, columnspan=4, sticky="w", pady=(0, 4))
+
+        # Output destination — derived: <src>_merged
+        r += 1
+        self.dst_lbl = label(f, "", font_size=11, fg=C["text_dim"])
+        self.dst_lbl.grid(row=r, column=0, columnspan=4, sticky="w", pady=(0, 8))
+
+        # Run controls
+        r += 1
+        hairline(f).grid(row=r, column=0, columnspan=4, sticky="we", pady=12)
+        r += 1
+        ctrl = ctk.CTkFrame(f, fg_color="transparent")
+        ctrl.grid(row=r, column=0, columnspan=4, sticky="w")
+        self.run_btn = ctk.CTkButton(
+            ctrl, text="▶  เริ่มรวม", command=self.start,
+            width=140, height=34, corner_radius=4,
+            font=(FONT, 12, "bold"),
+            fg_color=C["accent_btn"], hover_color=C["accent_btn_hi"],
+            text_color=C["text_bright"],
+        )
+        self.run_btn.pack(side="left", padx=(0, 8))
+        self.open_btn = ctk.CTkButton(
+            ctrl, text="📂 เปิดโฟลเดอร์ผลลัพธ์", command=self._open_output,
+            width=190, height=34, corner_radius=4,
+            font=(FONT, 12),
+            fg_color="transparent", hover_color=C["panel_hi"],
+            text_color=C["text"], border_width=1, border_color=C["border_input"],
+        )
+        self.open_btn.pack(side="left")
+
+        # Log area
+        ctk.CTkFrame(self, fg_color="transparent", height=12).pack()
+        log_card = ctk.CTkFrame(self, fg_color=C["panel"], corner_radius=6, border_width=1,
+                                border_color=C["border"])
+        log_card.pack(fill="both", expand=True, padx=24, pady=(0, 16))
+        ph = ctk.CTkFrame(log_card, fg_color="transparent")
+        ph.pack(fill="x", padx=14, pady=(10, 4))
+        label(ph, "บันทึกการรวม", font_size=12, weight="bold",
+              fg=C["text_bright"]).pack(side="left")
+        self.log_box = tk.Text(
+            log_card, height=10, bg=C["bg"], fg=C["text"], insertbackground=C["text"],
+            relief="flat", borderwidth=0, font=(FONT, 11), wrap="none",
+        )
+        self.log_box.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # Wire change tracking → update preview + dst
+        for v in (self.src_var, self.prefix_var, self.start_var, self.end_var,
+                  self.group_var, self.ext_var):
+            v.trace_add("write", lambda *_: self._refresh_preview())
+        self._refresh_preview()
+
+    def _entry(self, parent, var):
+        # alias for consistency with ServicePanel pattern
+        return ctk.CTkEntry(
+            parent, textvariable=var, height=30, corner_radius=4,
+            font=(FONT, 12),
+            fg_color=C["input"], border_color=C["border_input"], text_color=C["text"],
+        )
+
+    def _spinbox(self, parent, var, lo, hi):
+        f = ctk.CTkFrame(parent, fg_color="transparent")
+        ent = ctk.CTkEntry(f, textvariable=var, width=80, height=30, corner_radius=4,
+                           font=(FONT, 12),
+                           fg_color=C["input"], border_color=C["border_input"],
+                           text_color=C["text"], justify="center")
+        ent.pack(side="left")
+        def step(d):
+            try:
+                v = int(var.get())
+            except (ValueError, tk.TclError):
+                v = lo
+            v = max(lo, min(hi, v + d))
+            var.set(v)
+        ctk.CTkButton(f, text="−", width=24, height=30, corner_radius=4,
+                      font=(FONT, 14, "bold"),
+                      fg_color=C["panel_hi"], hover_color=C["selected"],
+                      text_color=C["text"], border_width=1, border_color=C["border_input"],
+                      command=lambda: step(-1)).pack(side="left", padx=(4, 0))
+        ctk.CTkButton(f, text="+", width=24, height=30, corner_radius=4,
+                      font=(FONT, 14, "bold"),
+                      fg_color=C["panel_hi"], hover_color=C["selected"],
+                      text_color=C["text"], border_width=1, border_color=C["border_input"],
+                      command=lambda: step(1)).pack(side="left", padx=(4, 0))
+        return f
+
+    def _browse_src(self):
+        initial = str(APP_ROOT / "output" if (APP_ROOT / "output").exists() else APP_ROOT)
+        folder = filedialog.askdirectory(initialdir=initial,
+                                         title="เลือกโฟลเดอร์ที่มีไฟล์ .m4a/.mp3")
+        if not folder:
+            return
+        self.src_var.set(folder)
+        self.src_lbl.configure(text=folder)
+        self._auto_detect()
+
+    def _auto_detect(self):
+        src = Path(self.src_var.get())
+        ext = self.ext_var.get() or "m4a"
+        prefix, start, end, count = detect_prefix_range(src, ext)
+        if prefix is None:
+            self.detected_lbl.configure(
+                text=f"⚠ ไม่พบไฟล์รูปแบบ '<ชื่อ><เลข>.{ext}' ในโฟลเดอร์นี้",
+                text_color=C["warn"])
+            return
+        self.detected_lbl.configure(
+            text=f"✓ พบ '{prefix.strip()}' ตอน {start}-{end} ({count} ไฟล์)",
+            text_color=C["ok"])
+        self.prefix_var.set(prefix)
+        self.start_var.set(start)
+        self.end_var.set(end)
+
+    def _refresh_preview(self):
+        try:
+            s = int(self.start_var.get())
+            e = int(self.end_var.get())
+            g = int(self.group_var.get())
+        except (ValueError, tk.TclError):
+            self.preview_lbl.configure(text="")
+            return
+        if g <= 0 or s > e:
+            self.preview_lbl.configure(text="")
+            return
+        groups = []
+        i = s
+        while i <= e:
+            j = min(i + g - 1, e)
+            groups.append((i, j))
+            i = j + 1
+        prefix = self.prefix_var.get()
+        ext = self.ext_var.get() or "m4a"
+        sample = [f"{prefix}{a}-{b}.{ext}" for a, b in groups[:3]]
+        more = f"  …และอีก {len(groups) - 3} กลุ่ม" if len(groups) > 3 else ""
+        self.preview_lbl.configure(
+            text=f"จะได้ {len(groups)} ไฟล์ผลลัพธ์: {', '.join(sample)}{more}",
+            text_color=C["text_dim"])
+        # Destination preview
+        dst = Path(self.src_var.get()).with_name(Path(self.src_var.get()).name + "_merged")
+        self.dst_lbl.configure(
+            text=f"🎵 ไฟล์รวมจะอยู่ที่:  {dst}",
+            text_color=C["text_dim"])
+
+    def _open_output(self):
+        dst = Path(self.src_var.get()).with_name(Path(self.src_var.get()).name + "_merged")
+        dst.mkdir(parents=True, exist_ok=True)
+        if sys.platform.startswith("win"):
+            os.startfile(str(dst))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(dst)])
+        else:
+            subprocess.Popen(["xdg-open", str(dst)])
+
+    def _log(self, line: str):
+        self.log_box.insert("end", line + "\n")
+        self.log_box.see("end")
+
+    def start(self):
+        if self.running:
+            return
+        if not _RUN_LOCK.acquire(blocking=False):
+            self.on_status("มีบริการอื่นกำลังทำงานอยู่", "warn")
+            return
+        src = Path(self.src_var.get())
+        if not src.exists():
+            self._log(f"[error] โฟลเดอร์ไม่มีอยู่: {src}")
+            _RUN_LOCK.release()
+            return
+        prefix = self.prefix_var.get()
+        try:
+            start, end = int(self.start_var.get()), int(self.end_var.get())
+            group = int(self.group_var.get())
+        except (ValueError, tk.TclError):
+            self._log("[error] กรุณาใส่ตัวเลขให้ถูกต้อง")
+            _RUN_LOCK.release()
+            return
+        ext = self.ext_var.get() or "m4a"
+        dst = src.with_name(src.name + "_merged")
+        argv = [
+            "merge_groups.py",
+            "--src", str(src), "--dst", str(dst),
+            "--prefix", prefix,
+            "--start", str(start), "--end", str(end),
+            "--group", str(group), "--ext", ext,
+        ]
+        self.start_time = time.time()
+        self.running = True
+        self.run_btn.configure(state="disabled")
+        self.log_box.delete("1.0", "end")
+        self._log(f"[plan] รวม {prefix}{start}-{end} เป็นกลุ่มละ {group} ตอน")
+        self._log(f"[plan] ผลลัพธ์ที่: {dst}")
+        self.on_status(f"กำลังรวม {prefix}{start}-{end} กลุ่มละ {group}", "run")
+        threading.Thread(target=self._run_in_thread,
+                         args=("merge_groups.py", argv), daemon=True).start()
+        if not self._tick_scheduled:
+            self._tick_scheduled = True
+            self.after(100, self._tick)
+
+    def _run_in_thread(self, script_filename: str, argv: list[str]):
+        old_argv = sys.argv[:]
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        old_cwd = os.getcwd()
+
+        class _QWriter(io.TextIOBase):
+            def __init__(self, q):
+                self.q = q
+                self.buf = ""
+            def write(self, s):
+                self.buf += s
+                while "\n" in self.buf:
+                    line, self.buf = self.buf.split("\n", 1)
+                    if line:
+                        self.q.put(line)
+                return len(s)
+            def flush(self):
+                pass
+
+        try:
+            os.chdir(str(APP_ROOT))
+            sys.argv = argv
+            sys.stdout = _QWriter(self.event_q)
+            sys.stderr = sys.stdout
+            try:
+                mod = _load_script_module(script_filename)
+                mod.main()
+            except SystemExit:
+                pass
+            except Exception as e:
+                self.event_q.put(f"[error] {type(e).__name__}: {e}")
+        finally:
+            sys.argv = old_argv
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+            try:
+                os.chdir(old_cwd)
+            except Exception:
+                pass
+            _RUN_LOCK.release()
+            self.event_q.put(None)
+
+    def _tick(self):
+        finished = False
+        while True:
+            try:
+                msg = self.event_q.get_nowait()
+            except queue.Empty:
+                break
+            if msg is None:
+                finished = True
+                break
+            self._log(str(msg))
+        if finished:
+            elapsed = time.time() - self.start_time if self.start_time else 0
+            self._log(f"\n=== เสร็จใน {elapsed:.1f} วินาที ===")
+            self.run_btn.configure(state="normal")
+            self.running = False
+            self._tick_scheduled = False
+            self.on_status(f"รวมไฟล์เสร็จแล้ว ({elapsed:.1f}s)", "ok")
+            return
+        self.after(200, self._tick)
+
+
 # ─── App ─────────────────────────────────────────────────────────────────────
 class App:
     def __init__(self):
@@ -908,7 +1502,9 @@ class App:
                     pass
                 break
 
-        self.panels: dict[str, ServicePanel] = {}
+        # Both ServicePanel (TTS backends) and MergePanel (audio merge tool)
+        # are kept in the same dict — they're both CTkFrames with .tkraise()
+        self.panels: dict[str, ctk.CTkFrame] = {}
         self.sidebar_btns: dict[str, ctk.CTkButton] = {}
         self.active_key: str | None = None
 
@@ -980,6 +1576,23 @@ class App:
             btn.pack(fill="x", padx=8, pady=2)
             self.sidebar_btns[svc["key"]] = btn
 
+        # ── Tools section — non-TTS utilities ────────────────────────────
+        label(side, "  เครื่องมือ", font_size=10, weight="bold",
+              fg=C["text_muted"]).pack(anchor="w", padx=14, pady=(14, 4))
+        merge_btn = ctk.CTkButton(
+            side,
+            text="  🔀   รวมไฟล์เสียง",
+            anchor="w",
+            command=lambda: self._select("merge"),
+            height=36, corner_radius=4,
+            font=(FONT, 12, "bold"),
+            fg_color="transparent",
+            hover_color=C["hover"],
+            text_color=C["text"],
+        )
+        merge_btn.pack(fill="x", padx=8, pady=2)
+        self.sidebar_btns["merge"] = merge_btn
+
         # Spacer + footer
         ctk.CTkFrame(side, fg_color="transparent").pack(fill="both", expand=True)
         hairline(side, color="#2b2b2b").pack(fill="x", padx=10, pady=4)
@@ -1001,6 +1614,11 @@ class App:
             panel = ServicePanel(self.host, svc, on_status=self._set_status)
             panel.grid(row=0, column=0, sticky="nsew")
             self.panels[svc["key"]] = panel
+
+        # Merge tool — separate panel sharing the same content host
+        merge_panel = MergePanel(self.host, on_status=self._set_status)
+        merge_panel.grid(row=0, column=0, sticky="nsew")
+        self.panels["merge"] = merge_panel
 
     def _build_statusbar(self):
         self.statusbar = ctk.CTkFrame(self.root, fg_color=C["accent"], corner_radius=0,
