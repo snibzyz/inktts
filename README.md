@@ -1,86 +1,57 @@
 # INKTTS — แปลงข้อความภาษาไทยเป็นเสียง
 
-โปรแกรม batch TTS ภาษาไทย หน้าตา VS Code Dark+ แปลงไฟล์ `.txt` เป็น `.m4a`
-ใช้บริการ cloud TTS ฟรี 3 ตัว ไม่ต้องใช้ API key.
+โปรแกรม batch TTS ภาษาไทย Electron + React UI ตระกูลเดียวกับ INKIDEA / INKCRAW
+แปลงไฟล์ `.txt` → `.m4a` ผ่าน 3 บริการฟรี ไม่ต้องใช้ API key
 
 ![INKTTS](inktts.png)
 
-## ดาวน์โหลด (Windows)
+## การใช้งาน (Dev)
 
-**[⬇ INKTTS.exe (78 MB)](https://github.com/snibzyz/inktts/releases/latest/download/INKTTS.exe)**
-— release ปัจจุบันคือ [v1.0.0](https://github.com/snibzyz/inktts/releases/tag/v1.0.0)
-
-หรือผ่าน GitHub CLI:
 ```bash
-gh release download v1.0.0 --repo snibzyz/inktts -p INKTTS.exe
+pnpm install   # หรือ install.bat
+pnpm dev       # หรือ start.bat
 ```
 
-## ใช้งานคลิกเดียว
-
-1. วาง `INKTTS.exe` ที่โฟลเดอร์ไหนก็ได้ — โปรแกรมจะใช้โฟลเดอร์ข้าง ๆ มันเป็น working dir
-2. เอาไฟล์ `.txt` ภาษาไทยใส่ในโฟลเดอร์ `input/` (สร้างให้อัตโนมัติเมื่อรันครั้งแรก)
-3. ดับเบิลคลิก `INKTTS.exe` → เลือกบริการ → กด **เริ่มแปลงเสียง**
-4. ผลลัพธ์ `.m4a` อยู่ใน `output/<service>/`
-
-ไม่ต้องลง Python, ไม่ต้องลง ffmpeg — ฝังมาในตัว `.exe` หมดแล้ว.
+ต้องมี Node.js 20+ และ pnpm
 
 ## บริการ TTS
 
 | บริการ | คุณภาพ | ความเสถียร | หมายเหตุ |
 |--------|--------|------------|----------|
-| ⭐ **Microsoft Edge** | Neural (Premwadee / Niwat) | ปานกลาง | คุณภาพดีที่สุด |
-| 🌐 **Google Translate** | Standard | **เสถียรที่สุด** | ใช้งานต่อเนื่องได้นาน |
-| 🎙 **ResponsiveVoice** | Standard | ปานกลาง | เลือกเพศชาย/หญิงได้ |
+| ⭐ Microsoft Edge | Neural (Premwadee / Niwat) | ปานกลาง | คุณภาพดีที่สุด |
+| 🌐 Google Translate | Standard | เสถียรที่สุด | ใช้งานต่อเนื่องได้นาน |
+| 🎙 ResponsiveVoice | Standard | ปานกลาง | เลือกเพศชาย/หญิงได้ |
 
-## โหมดนักพัฒนา (รัน Python)
-
-```bash
-pip install -r requirements.txt   # customtkinter, edge-tts, aiohttp, pillow
-python main.py                    # หรือ python app.py
-```
-
-ต้องมี `ffmpeg` ใน PATH (โหมด dev เท่านั้น — .exe ฝังมาในตัว)
-
-## Build .exe เอง
-
-```bash
-pip install pyinstaller pillow
-python -m PyInstaller INKTTS.spec --noconfirm
-# ได้ dist/INKTTS.exe ขนาด ~78 MB
-```
-
-PyInstaller จะหา `ffmpeg.exe` จาก `PATH` ของเครื่องที่ build อัตโนมัติ
-(ถ้าเป็น chocolatey shim 392 KB จะไปดึงตัวจริงจาก
-`C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin\ffmpeg.exe`)
-
-## โครงสร้างโปรเจ็กต์
+## โครงสร้าง
 
 ```
 INKTTS/
-├── app.py              GUI หลัก (CustomTkinter, dark theme)
-├── main.py             entry-point สำหรับ python main.py
-├── INKTTS.spec         PyInstaller config — ฝัง ffmpeg + scripts
-├── inktts.ico/.png     ไอคอนโปรแกรม
-├── scripts/            สคริปต์ TTS แต่ละบริการ
-│   ├── _lib.py           orchestration ร่วม (split, concat, retry)
-│   ├── edge.py           Microsoft Edge Read Aloud
-│   ├── google.py         Google Translate TTS
-│   ├── responsivevoice.py
-│   └── merge_groups.py   tool รวม chunk เก่า
-├── docs/               เอกสารอ้างอิงเชิงลึก
-├── input/              ไฟล์ .txt ที่ต้องการแปลง (gitignored)
-├── output/             ไฟล์เสียง .m4a (gitignored)
-├── _cache/             chunk ระหว่าง process (gitignored)
-└── .test/              smoke tests + fixtures
+├── .app/
+│   └── shell/             ← Electron + React (1 เดียว)
+│       ├── electron/      ← main process + IPC + TTS engine
+│       └── src/           ← renderer (React)
+├── input/                 ← วาง .txt ที่จะแปลง
+├── output/                ← .m4a ที่แปลงเสร็จ
+├── inktts.ico / inktts.png
+├── start.bat / install.bat
+└── package.json (workspace)
 ```
 
-## หลัก 3 ปุ่มหลัก
+## Build
+
+```bash
+pnpm package:win   # → release/INKTTS-Portable-<version>.exe
+```
+
+## Auto-update
+
+Portable .exe รองรับ auto-update ผ่าน custom helper-cmd swap
+(เช็ค GitHub release ใหม่ทุก 30 นาที — ถ้ามีจะดาวน์โหลดและ swap แทนตัวเองอัตโนมัติ)
+
+## หลัก 3 ปุ่มหลัก (ตั้งค่าขั้นสูง)
 
 | ปุ่ม | ความหมาย | ค่าแนะนำ |
 |------|----------|----------|
-| **จำนวนไฟล์ต่อรอบ** | กี่ไฟล์ที่ทำงานพร้อมกันใน 1 รอบ | 10 (Edge) / 1 (Google, RV) |
-| **การเชื่อมต่อต่อไฟล์** | กี่ HTTP requests ต่อ 1 ไฟล์พร้อมกัน | 2-4 |
-| **พรีเซต** | ค่าผสมที่ปรับมาแล้ว (เร็วสุด / batch / ปลอดภัย) | ⭐ ที่เลือกตอนเริ่ม |
-
-อ่านรายละเอียดในเอกสาร [`docs/terminology.md`](docs/terminology.md) และ
-[`docs/optimal_strategy.md`](docs/optimal_strategy.md).
+| จำนวนไฟล์ต่อรอบ | กี่ไฟล์ที่ทำงานพร้อมกันใน 1 รอบ | 10 (Edge) / 1 (Google, RV) |
+| การเชื่อมต่อต่อไฟล์ | กี่ HTTP requests ต่อ 1 ไฟล์พร้อมกัน | 2-4 |
+| พรีเซต | ค่าผสมที่ปรับมาแล้ว (เร็วสุด / batch / ปลอดภัย) | ⭐ ที่เลือกตอนเริ่ม |

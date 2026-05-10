@@ -1,39 +1,11 @@
-# PyInstaller build artifacts
-build/
-dist/
-INKTTS.exe
-*.spec.bak
-
-# Python bytecode
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-.venv/
-venv/
-
-# Per-run TTS chunk cache (regenerated on each run)
-_cache/
-
-# Generated audio outputs (potentially large + user-specific)
+node_modules/
+.app/shell/dist/
+.app/shell/release/
+.app/shell/build/
+input/
 output/
-
-# User input text files (treat input/ as scratch, but keep folder)
-input/*
-!input/.gitkeep
-
-# Self-test artifacts
-_self_test_result.txt
-_smoke_*.log
-_fail_*.log
-
-# OS / IDE
+_cache/
+.old/
+*.log
 .DS_Store
 Thumbs.db
-.vscode/
-.idea/
-
-# Editor swap files
-*.swp
-*.swo
-*~

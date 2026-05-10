@@ -1,0 +1,59 @@
+@import '@vscode/codicons/dist/codicon.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  font-family: Tahoma, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background: #1e1e1e;
+  color: #cccccc;
+  overflow: hidden;
+  user-select: none;
+}
+
+input, textarea {
+  user-select: text;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #555555;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 14px;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: #3a3a3a;
+  border-radius: 2px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  width: 14px;
+  border-radius: 50%;
+  background: #cccccc;
+  margin-top: -5px;
+  cursor: pointer;
+}
+input[type="range"]:focus::-webkit-slider-thumb {
+  background: #ffffff;
+}

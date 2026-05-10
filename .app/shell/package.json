@@ -1,0 +1,77 @@
+{
+  "name": "@inktts/desktop-shell",
+  "version": "1.0.0",
+  "private": true,
+  "description": "INKTTS desktop shell — Electron + React renderer",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k -n vite,electron -c blue,magenta \"pnpm dev:vite\" \"pnpm dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on http://localhost:5473 && cross-env NODE_ENV=development electron .",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "smoke:tts": "node electron/__tests__/smoke-tts.cjs",
+    "smoke:merge": "node electron/__tests__/smoke-merge.cjs",
+    "package:win": "pnpm build && electron-builder --win portable",
+    "publish:win": "pnpm build && electron-builder --win portable --publish always"
+  },
+  "dependencies": {
+    "@vscode/codicons": "^0.0.45",
+    "ffmpeg-static": "^5.3.0",
+    "msedge-tts": "^2.0.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.0.1",
+    "cross-env": "^7.0.3",
+    "electron": "^32.2.5",
+    "electron-builder": "^25.1.8",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.inktts.app",
+    "productName": "INKTTS",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "!electron/__tests__/**",
+      "package.json",
+      "public/**/*",
+      "node_modules/ffmpeg-static/**"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "snibzyz",
+        "repo": "inktts"
+      }
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "public/logo.ico"
+    },
+    "portable": {
+      "artifactName": "INKTTS-Portable-${version}.exe"
+    }
+  }
+}
