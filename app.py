@@ -388,6 +388,7 @@ class ServicePanel(ctk.CTkFrame):
             state="readonly", command=self._apply_preset,
             width=320, height=30,
             font=(FONT, 12),
+            dropdown_font=(FONT, 12),
             fg_color=C["input"], border_color=C["border_input"], button_color=C["panel_hi"],
             button_hover_color=C["selected"], dropdown_fg_color=C["input"],
             dropdown_text_color=C["text"], text_color=C["text"],
@@ -552,6 +553,7 @@ class ServicePanel(ctk.CTkFrame):
             cb = ctk.CTkComboBox(
                 parent, values=fdef["options"], variable=v, state="readonly",
                 width=260, height=30, font=(FONT, 12),
+                dropdown_font=(FONT, 12),
                 fg_color=C["input"], border_color=C["border_input"], button_color=C["panel_hi"],
                 button_hover_color=C["selected"], dropdown_fg_color=C["input"],
                 dropdown_text_color=C["text"], text_color=C["text"],
@@ -851,6 +853,13 @@ class App:
         import tkinter.font as tkfont
         installed = set(tkfont.families(self.root))
         FONT = _pick_font(installed)
+        # Override CustomTkinter's theme default — covers any widget that
+        # doesn't pass an explicit `font=` (e.g. internal sub-widgets)
+        try:
+            ctk.ThemeManager.theme["CTkFont"]["family"] = FONT
+            ctk.ThemeManager.theme["CTkFont"]["size"] = 12
+        except (AttributeError, KeyError):
+            pass
         self._apply_font_globally(tkfont)
         # App icon (search both project root and PyInstaller bundle dir)
         for candidate in (APP_ROOT / "inktts.ico", _bundle_dir() / "inktts.ico"):
