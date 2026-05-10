@@ -175,7 +175,8 @@ SERVICES = [
         "subtitle": "เสียงคุณภาพสูง · ฟรี · ไม่ต้องใช้ API key",
         "script":   SCRIPTS_DIR / "edge.py",
         "output":   "output/edge",
-        "max_total": 56,
+        # cap = max preset total (auto-grows if presets add a heavier combo)
+        "max_total": max(b * c for _, b, c in EDGE_PRESETS),
         "presets":  EDGE_PRESETS,
         "default_preset": 2,
         "fields": [
@@ -194,7 +195,7 @@ SERVICES = [
         "subtitle": "เสียงปกติ · ฟรี · ไม่ต้องใช้ API key · เสถียรที่สุด",
         "script":   SCRIPTS_DIR / "google.py",
         "output":   "output/google",
-        "max_total": 8,
+        "max_total": max(b * c for _, b, c in GOOGLE_PRESETS),
         "presets":  GOOGLE_PRESETS,
         "default_preset": 1,
         "fields": [
@@ -214,7 +215,7 @@ SERVICES = [
         "subtitle": "เสียงปกติ · ฟรี · เลือกเพศชาย/หญิงได้",
         "script":   SCRIPTS_DIR / "responsivevoice.py",
         "output":   "output/responsivevoice",
-        "max_total": 8,
+        "max_total": max(b * c for _, b, c in RV_PRESETS),
         "presets":  RV_PRESETS,
         "default_preset": 1,
         "fields": [
