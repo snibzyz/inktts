@@ -5,13 +5,22 @@
 
 ![INKTTS](inktts.png)
 
-## ใช้งานคลิกเดียว (.exe)
+## ดาวน์โหลด (Windows)
 
-1. โหลด `INKTTS.exe` (build แล้วใน `dist/INKTTS.exe`)
-2. วางไว้ที่โฟลเดอร์ไหนก็ได้ — โปรแกรมจะใช้โฟลเดอร์ข้าง ๆ มันเป็น working dir
-3. เอาไฟล์ `.txt` ภาษาไทยใส่ในโฟลเดอร์ `input/` (สร้างให้อัตโนมัติ)
-4. ดับเบิลคลิก `INKTTS.exe` → เลือกบริการ → กด **เริ่มแปลงเสียง**
-5. ผลลัพธ์ `.m4a` อยู่ใน `output/<service>/`
+**[⬇ INKTTS.exe (78 MB)](https://github.com/snibzyz/inktts/releases/latest/download/INKTTS.exe)**
+— release ปัจจุบันคือ [v1.0.0](https://github.com/snibzyz/inktts/releases/tag/v1.0.0)
+
+หรือผ่าน GitHub CLI:
+```bash
+gh release download v1.0.0 --repo snibzyz/inktts -p INKTTS.exe
+```
+
+## ใช้งานคลิกเดียว
+
+1. วาง `INKTTS.exe` ที่โฟลเดอร์ไหนก็ได้ — โปรแกรมจะใช้โฟลเดอร์ข้าง ๆ มันเป็น working dir
+2. เอาไฟล์ `.txt` ภาษาไทยใส่ในโฟลเดอร์ `input/` (สร้างให้อัตโนมัติเมื่อรันครั้งแรก)
+3. ดับเบิลคลิก `INKTTS.exe` → เลือกบริการ → กด **เริ่มแปลงเสียง**
+4. ผลลัพธ์ `.m4a` อยู่ใน `output/<service>/`
 
 ไม่ต้องลง Python, ไม่ต้องลง ffmpeg — ฝังมาในตัว `.exe` หมดแล้ว.
 
