@@ -14,7 +14,9 @@
     "smoke:tts": "node electron/__tests__/smoke-tts.cjs",
     "smoke:merge": "node electron/__tests__/smoke-merge.cjs",
     "package:win": "pnpm build && electron-builder --win portable",
-    "publish:win": "pnpm build && electron-builder --win portable --publish always"
+    "publish:win": "pnpm build && electron-builder --win portable --publish always",
+    "package:mac": "pnpm build && electron-builder --mac dmg",
+    "publish:mac": "pnpm build && electron-builder --mac dmg --publish always"
   },
   "dependencies": {
     "@vscode/codicons": "^0.0.45",
@@ -72,6 +74,16 @@
     },
     "portable": {
       "artifactName": "INKTTS-Portable-${version}.exe"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.utilities",
+      "icon": "public/logo.png",
+      "identity": null,
+      "artifactName": "INKTTS-${version}-${arch}.${ext}"
+    },
+    "dmg": {
+      "writeUpdateInfo": false
     }
   }
 }
