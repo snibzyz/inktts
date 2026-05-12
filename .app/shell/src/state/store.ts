@@ -73,7 +73,7 @@ interface AppState {
   setMerge: (patch: Partial<MergeState>) => void;
   appendMergeLog: (line: { level: string; message: string }) => void;
   resetMergeLog: () => void;
-  update: { available: boolean; mode?: 'portable' | 'manual'; version?: string; current?: string; downloadUrl?: string; releaseUrl?: string; progress?: number; downloading?: boolean; ready?: boolean };
+  update: { available: boolean; mode?: 'portable' | 'manual'; version?: string; current?: string; downloadUrl?: string; releaseUrl?: string; releaseDate?: string | null; releaseNotes?: string; progress?: number; downloading?: boolean; ready?: boolean; error?: string | null };
   setUpdate: (patch: Partial<AppState['update']>) => void;
 }
 

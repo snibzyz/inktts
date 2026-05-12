@@ -32,19 +32,22 @@ export function App() {
         current: info.current,
         downloadUrl: info.downloadUrl,
         releaseUrl: info.releaseUrl,
+        releaseDate: info.releaseDate ?? null,
         downloading: auto,
         ready: false,
+        error: null,
       });
     });
     const offProg = window.inktts.app.onUpdateProgress((p) => {
       setUpdate({ progress: p.percent });
     });
     const offDone = window.inktts.app.onUpdateDownloaded(() => {
-      setUpdate({ downloading: false, ready: true });
+      setUpdate({ downloading: false, ready: true, error: null });
     });
-    const offErr = window.inktts.app.onUpdateError(() => {
-      // ดาวน์โหลดล้มเหลว → ออกจากสถานะ "downloading" จะ retry รอบหน้า (30 นาที)
-      setUpdate({ downloading: false, ready: false });
+    const offErr = window.inktts.app.onUpdateError((info) => {
+      // ดาวน์โหลดล้มเหลว → ออกจาก downloading + เก็บข้อความไว้ใน banner
+      // periodic poll (30 นาที) จะ retry — ถ้าสำเร็จ banner กลับมาเป็น downloading/ready ตามปกติ
+      setUpdate({ downloading: false, ready: false, error: info?.message || 'ดาวน์โหลดล้มเหลว' });
     });
     return () => { offAvail(); offProg(); offDone(); offErr(); };
   }, []);

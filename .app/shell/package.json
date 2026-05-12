@@ -1,6 +1,6 @@
 {
   "name": "@inktts/desktop-shell",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "private": true,
   "description": "INKTTS desktop shell — Electron + React renderer",
   "main": "electron/main.cjs",
@@ -13,8 +13,8 @@
     "test": "vitest run",
     "smoke:tts": "node electron/__tests__/smoke-tts.cjs",
     "smoke:merge": "node electron/__tests__/smoke-merge.cjs",
-    "package:win": "pnpm build && electron-builder --win portable",
-    "publish:win": "pnpm build && electron-builder --win portable --publish always",
+    "package:win": "pnpm build && electron-builder --win nsis portable",
+    "publish:win": "pnpm build && electron-builder --win nsis portable --publish always",
     "package:mac": "pnpm build && electron-builder --mac dmg",
     "publish:mac": "pnpm build && electron-builder --mac dmg --publish always"
   },
@@ -69,8 +69,21 @@
       }
     ],
     "win": {
-      "target": "portable",
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "public/logo.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "INKTTS",
+      "artifactName": "INKTTS-Setup-${version}.exe",
+      "deleteAppDataOnUninstall": false
     },
     "portable": {
       "artifactName": "INKTTS-Portable-${version}.exe"

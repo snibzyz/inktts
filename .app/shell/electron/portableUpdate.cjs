@@ -24,6 +24,14 @@ function isPortableWin() {
   return process.platform === 'win32' && !!process.env.PORTABLE_EXECUTABLE_FILE;
 }
 
+// NSIS-installed Windows — packaged แต่ไม่ใช่ portable
+// (auto-swap ทำไม่ได้ — installer ต้องเรียก setup.exe มา upgrade เอง)
+function isInstalledWin() {
+  return process.platform === 'win32'
+    && app.isPackaged
+    && !process.env.PORTABLE_EXECUTABLE_FILE;
+}
+
 function isMac() {
   return process.platform === 'darwin';
 }
@@ -70,12 +78,20 @@ function fetchJson(url) {
 // 10 นาที — ถ้าโหลดเกินนี้ถือว่า hang
 const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 
+// portable .exe ขนาดจริงปกติ ~80MB — ต่ำกว่า 30MB ถือว่าโหลดไม่ครบแน่นอน
+// (เคยมีบั๊กคือ S3 ตัดการเชื่อมต่อกลางคันแต่ stream finish ปกติ →
+//  เอาไฟล์ truncated มาทับตัวเก่า → NSIS extract ไม่ครบ → ffmpeg.dll หาย → app
+//  เปิดไม่ได้ — system error dialog)
+const MIN_PORTABLE_SIZE = 30 * 1024 * 1024;
+
 function downloadFile(url, destPath, onProgress) {
   return new Promise((resolve, reject) => {
     const req = net.request({ url, redirect: 'follow' });
     let settled = false;
     let ws = null;
     let timer = null;
+    let expectedTotal = 0;
+    let received = 0;
 
     const cleanup = () => {
       if (timer) { clearTimeout(timer); timer = null; }
@@ -103,16 +119,40 @@ function downloadFile(url, destPath, onProgress) {
         res.on('data', () => {});
         return;
       }
-      const total = parseInt(res.headers['content-length'] || '0', 10);
-      let received = 0;
+      expectedTotal = parseInt(res.headers['content-length'] || '0', 10);
       ws = fs.createWriteStream(destPath);
       ws.on('error', fail);
-      ws.on('finish', succeed);
+      // verify หลัง write stream flush เสร็จ:
+      //   1) ถ้ามี Content-Length → ขนาดต้องตรง 100%
+      //   2) sanity: ต้องใหญ่กว่า MIN_PORTABLE_SIZE
+      ws.on('finish', () => {
+        try {
+          const stat = fs.statSync(destPath);
+          if (expectedTotal > 0 && stat.size !== expectedTotal) {
+            fail(new Error(`download size mismatch: got ${stat.size}, expected ${expectedTotal}`));
+            return;
+          }
+          if (stat.size < MIN_PORTABLE_SIZE) {
+            fail(new Error(`download too small: ${stat.size} bytes (min ${MIN_PORTABLE_SIZE})`));
+            return;
+          }
+          succeed();
+        } catch (err) {
+          fail(err);
+        }
+      });
       res.on('data', (chunk) => {
         received += chunk.length;
-        if (onProgress) onProgress({ received, total, percent: total ? (received / total) * 100 : 0 });
+        if (onProgress) onProgress({ received, total: expectedTotal, percent: expectedTotal ? (received / expectedTotal) * 100 : 0 });
       });
       res.on('error', fail);
+      // ดักการตัดการเชื่อมต่อกลางคัน — บางครั้ง res จบเงียบ ๆ
+      // โดยที่ received < expectedTotal (S3 timeout, network drop)
+      res.on('end', () => {
+        if (expectedTotal > 0 && received < expectedTotal) {
+          fail(new Error(`incomplete download: received ${received}/${expectedTotal}`));
+        }
+      });
       res.pipe(ws);
     });
     req.on('error', fail);
@@ -121,7 +161,7 @@ function downloadFile(url, destPath, onProgress) {
 }
 
 async function checkForUpdates() {
-  if (!isPortableWin() && !isMac()) return null;
+  if (!isPortableWin() && !isMac() && !isInstalledWin()) return null;
   const { owner, repo } = getRepoInfo();
   try {
     const release = await fetchJson(`https://api.github.com/repos/${owner}/${repo}/releases/latest`);
@@ -131,8 +171,11 @@ async function checkForUpdates() {
     const available = compareSemver(latest, current) > 0;
     let asset = null;
     if (isPortableWin()) {
-      asset = (release.assets || []).find((a) =>
-        /portable.*\.exe$/i.test(a.name) || /^INKTTS-Portable.*\.exe$/i.test(a.name));
+      // เจาะจง INKTTS-Portable-<version>.exe เท่านั้น — กันชน Setup.exe ที่อยู่ใน release เดียวกัน
+      asset = (release.assets || []).find((a) => /^INKTTS-Portable-[\d.]+\.exe$/i.test(a.name));
+    } else if (isInstalledWin()) {
+      // NSIS-installed → ชี้ไป Setup.exe (manual install — user รัน installer ใหม่ทับเอง)
+      asset = (release.assets || []).find((a) => /^INKTTS-Setup-[\d.]+\.exe$/i.test(a.name));
     } else if (isMac()) {
       asset = (release.assets || []).find((a) => /\.dmg$/i.test(a.name));
     }
@@ -212,8 +255,9 @@ async function stageUpdate(downloadUrl, version, onProgress) {
   if (!isPortableWin()) throw new Error('portable Win only');
   const tmpExe = getStagePath(version);
 
-  // ถ้าไฟล์ stage อยู่แล้วและขนาดดูสมเหตุผล (>10MB) → skip download
-  if (fs.existsSync(tmpExe) && fs.statSync(tmpExe).size > 10 * 1024 * 1024) {
+  // ถ้าไฟล์ stage อยู่แล้วและขนาดผ่าน sanity → skip download
+  // (เกณฑ์เดียวกับ MIN_PORTABLE_SIZE ใน downloadFile — กันเอาไฟล์ truncated มา swap)
+  if (fs.existsSync(tmpExe) && fs.statSync(tmpExe).size >= MIN_PORTABLE_SIZE) {
     const marker = readStageMarker();
     if (marker && marker.version === version && marker.path === tmpExe) {
       log.info('already staged', { version, tmpExe });
@@ -243,29 +287,56 @@ function applyStaged() {
   }
 
   const tmpExe = marker.path;
+
+  // กันซ้ำชั้นสอง: ก่อน swap ตรวจขนาดอีกที — เผื่อไฟล์ stage หายไปครึ่งทาง
+  // (disk เต็ม, antivirus ลบ, ผู้ใช้ลบ %TEMP%) — ถ้าโหลดไม่ครบจะทำลายตัวเก่า
+  try {
+    const stagedSize = fs.statSync(tmpExe).size;
+    if (stagedSize < MIN_PORTABLE_SIZE) {
+      log.warn('staged file too small — aborting apply', { tmpExe, stagedSize });
+      try { fs.unlinkSync(tmpExe); } catch { /* noop */ }
+      clearStageMarker();
+      return false;
+    }
+  } catch (err) {
+    log.warn('staged file stat failed — aborting apply', { error: err && err.message });
+    clearStageMarker();
+    return false;
+  }
+
   const helperPath = path.join(app.getPath('temp'), `inktts-update-${Date.now()}.cmd`);
+  const vbsPath = helperPath.replace(/\.cmd$/, '.vbs');
   const script = [
     '@echo off',
-    'timeout /t 2 /nobreak > nul',
-    `move /Y "${tmpExe}" "${oldExe}"`,
-    'if errorlevel 1 (',
-    '  echo INKTTS update failed: cannot replace exe',
-    '  exit /b 1',
-    ')',
+    'timeout /t 2 /nobreak > nul 2>&1',
+    `move /Y "${tmpExe}" "${oldExe}" > nul 2>&1`,
+    'if errorlevel 1 exit /b 1',
     `start "" "${oldExe}"`,
+    `del "${vbsPath}" 2>nul`,
     '(goto) 2>nul & del "%~f0"',
     '',
   ].join('\r\n');
   fs.writeFileSync(helperPath, script, 'utf8');
 
-  spawn('cmd.exe', ['/c', helperPath], {
+  // VBS wrapper: ใช้ WScript.Shell.Run mode 0 (hidden) + False (no wait)
+  //
+  // เหตุผลที่ต้องห่อ: spawn('cmd.exe', ..., { detached: true, windowsHide: true })
+  // ไม่ทำงานเสถียรบน Windows — detached cmd.exe ขอ console ใหม่ → กล่องดำกระพริบ
+  // ระหว่าง timeout/move ก่อนที่ start "" จะคืนคุม
+  //
+  // WScript รัน 1 บรรทัดแล้ว exit — ตัว .cmd ลบ .vbs เอง
+  const cmdLine = `cmd.exe /c "${helperPath}"`.replace(/"/g, '""');
+  const vbsContent = `CreateObject("WScript.Shell").Run "${cmdLine}", 0, False\r\n`;
+  fs.writeFileSync(vbsPath, vbsContent, 'utf8');
+
+  spawn('wscript.exe', [vbsPath], {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
   }).unref();
 
   clearStageMarker();
-  log.info('apply: helper spawned', { from: tmpExe, to: oldExe });
+  log.info('apply: helper spawned (silent via vbs)', { from: tmpExe, to: oldExe });
   return true;
 }
 
@@ -285,6 +356,7 @@ async function downloadAndApply(downloadUrl, version, mainWindow) {
 
 module.exports = {
   isPortableWin,
+  isInstalledWin,
   isMac,
   canAutoApply,
   checkForUpdates,

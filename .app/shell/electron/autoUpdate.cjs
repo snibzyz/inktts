@@ -109,7 +109,7 @@ function start(mainWindow) {
     log.info('auto-update disabled in dev');
     return;
   }
-  if (!portable.isPortableWin() && !portable.isMac()) {
+  if (!portable.isPortableWin() && !portable.isMac() && !portable.isInstalledWin()) {
     log.info('update check unsupported on this platform/mode', { platform: process.platform });
     return;
   }
@@ -133,7 +133,7 @@ function registerIpc() {
   // silent stage download → app:updateDownloaded
   ipcMain.handle('app:checkUpdate', async () => {
     if (process.env.NODE_ENV === 'development') return { ok: false, error: 'disabled in dev' };
-    if (!portable.isPortableWin() && !portable.isMac()) return { ok: false, error: 'platform not supported' };
+    if (!portable.isPortableWin() && !portable.isMac() && !portable.isInstalledWin()) return { ok: false, error: 'platform not supported' };
     // เรียก checkOnce ที่จัดการ stage flow + IPC events เอง
     // ก่อน return ให้ renderer — fire-and-forget เพื่อไม่ block ปุ่ม
     const previewResult = await portable.checkForUpdates();
