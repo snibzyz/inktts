@@ -1,6 +1,6 @@
 const { ipcMain, app } = require('electron');
 const settings = require('../helpers/settings.cjs');
-const { getDefaultInputDir, getDefaultOutputDir } = require('../helpers/paths.cjs');
+const { getDefaultInputDir, getDefaultOutputDir, getCacheSize, clearCache, getCacheRoot } = require('../helpers/paths.cjs');
 
 function registerSettingsIpc() {
   // อ่านทั้งก้อน — renderer hydrate state ตอน boot
@@ -32,6 +32,16 @@ function registerSettingsIpc() {
   ipcMain.handle('settings:setOutputDir', (_e, dir) => {
     const ok = settings.patch({ paths: { outputDir: dir || null } });
     return { ok };
+  });
+
+  // Cache management — chunks/<service>/<base>/*.mp3 ใน userData/cache/
+  ipcMain.handle('cache:size', () => {
+    try { return { ok: true, bytes: getCacheSize(), path: getCacheRoot() }; }
+    catch (err) { return { ok: false, error: err && err.message, bytes: 0 }; }
+  });
+  ipcMain.handle('cache:clear', () => {
+    try { const ok = clearCache(); return { ok }; }
+    catch (err) { return { ok: false, error: err && err.message }; }
   });
 }
 

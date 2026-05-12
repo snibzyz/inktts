@@ -24,6 +24,29 @@ export function SettingsPanel() {
   const [checking, setChecking] = useState(false);
   const [lastCheck, setLastCheck] = useState<string | null>(null);
   const [info, setInfo] = useState<FolderInfo | null>(null);
+  const [cacheBytes, setCacheBytes] = useState<number | null>(null);
+  const [cachePath, setCachePath] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
+
+  const refreshCache = async () => {
+    const r = await window.inktts.cache.size();
+    if (r.ok) {
+      setCacheBytes(r.bytes);
+      if (r.path) setCachePath(r.path);
+    }
+  };
+
+  const onClearCache = async () => {
+    setClearing(true);
+    const r = await window.inktts.cache.clear();
+    setClearing(false);
+    if (r.ok) {
+      setStatus({ kind: 'ok', message: 'ล้างข้อมูลชั่วคราวเรียบร้อย' });
+      refreshCache();
+    } else {
+      setStatus({ kind: 'fail', message: r.error || 'ล้างข้อมูลชั่วคราวไม่สำเร็จ' });
+    }
+  };
 
   const refreshInfo = async () => {
     const r = await window.inktts.settings.get();
@@ -38,7 +61,7 @@ export function SettingsPanel() {
     setRoots(root);
   };
 
-  useEffect(() => { refreshInfo(); }, []);
+  useEffect(() => { refreshInfo(); refreshCache(); }, []);
 
   useEffect(() => {
     if (update.available && update.version) {
@@ -166,6 +189,37 @@ export function SettingsPanel() {
           </div>
         </AppCard>
 
+        <AppCard title="ข้อมูลชั่วคราว (Cache)" bodyClassName="space-y-3">
+          <div className="text-[13px] text-vscode-fg leading-relaxed">
+            แอพเก็บชิ้นเสียงที่ดาวน์โหลดมาไว้ใช้รอบถัดไป — ถ้าไฟดับ ปิดเครื่อง หรือเปิดใหม่กลางทาง
+            กดเริ่มใหม่จะ <span className="text-vscode-fg-bright">ทำต่อจากเดิม</span> ไม่เริ่มจาก 0
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2 text-[14px]">
+              <Codicon name="database" size={16} className="text-vscode-fg-dim" />
+              <span className="text-vscode-fg">ขนาดที่ใช้:</span>
+              <span className="font-mono text-vscode-fg-bright">{cacheBytes == null ? '–' : formatBytes(cacheBytes)}</span>
+            </div>
+            <AppButton tone="zinc" variant="flat" onClick={refreshCache} title="คำนวณใหม่">
+              <Codicon name="refresh" size={14} />
+              รีเฟรช
+            </AppButton>
+            <AppButton tone="zinc" variant="flat" onClick={onClearCache} disabled={clearing || (cacheBytes ?? 0) === 0}>
+              <Codicon name={clearing ? 'sync' : 'trash'} size={14} spin={clearing} />
+              {clearing ? 'กำลังล้าง...' : 'ล้างข้อมูลชั่วคราว'}
+            </AppButton>
+            {cachePath && (
+              <AppButton tone="zinc" variant="icon" onClick={() => window.inktts.fs.revealFolder(cachePath)} title="เปิดในตัวจัดการไฟล์">
+                <Codicon name="link-external" size={15} />
+              </AppButton>
+            )}
+          </div>
+          <div className="text-[12px] text-vscode-fg-dim flex items-start gap-2">
+            <Codicon name="info" size={14} className="mt-0.5" />
+            <span>กดล้างเมื่อยืนยันว่างานทุกไฟล์รวมเสร็จแล้ว — ล้างกลางทางจะต้องดาวน์โหลดใหม่</span>
+          </div>
+        </AppCard>
+
         <AppCard title="เกี่ยวกับ" bodyClassName="space-y-2">
           <div className="text-[13px] text-vscode-fg leading-relaxed">
             INKTTS คือเครื่องมือแปลงข้อความภาษาไทยเป็นเสียงทีละหลายไฟล์ ผ่านบริการ TTS ฟรี 3 ตัว
@@ -185,6 +239,15 @@ export function SettingsPanel() {
       </div>
     </div>
   );
+}
+
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+  return `${v < 10 ? v.toFixed(2) : v < 100 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
 }
 
 function FolderRow({

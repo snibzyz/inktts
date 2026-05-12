@@ -2,7 +2,7 @@
 
 export type ServiceKey = 'edge' | 'google' | 'rv';
 
-export type FieldKind = 'combo' | 'entry' | 'spinbox' | 'scale';
+export type FieldKind = 'combo' | 'entry' | 'spinbox' | 'scale' | 'rate';
 
 export interface FieldDef {
   name: string;
@@ -15,6 +15,14 @@ export interface FieldDef {
   max?: number;
   step?: number;
   advanced?: boolean;
+  // 'rate' kind only — สร้าง stepper +/- ที่ user กด/พิมพ์ปรับเองได้
+  // unit='%':         เก็บ % โดยตรง (Edge) → engine รับ "+30%"
+  // unit='mult-pct':  เก็บ multiplier (Google/RV tempo) → engine รับ number, แต่ user เห็นเป็น "+30%"
+  //                   storage 1.3 ↔ display "+30%", storage 0.5 ↔ display "-50%"
+  // unit='x':         เก็บ + แสดง multiplier เช่น "1.30x"
+  // unit='':          เก็บ + แสดง number ตรง ๆ (RV ขั้นสูง)
+  unit?: '%' | 'mult-pct' | 'x' | '';
+  precision?: number; // จำนวนทศนิยมที่แสดง (default: 0 ถ้า step>=1, 1 ถ้า step>=0.1, 2 อื่น ๆ)
 }
 
 export interface PresetDef {
@@ -123,6 +131,11 @@ declare global {
         patch: (partial: Partial<PersistedSettings>) => Promise<{ ok: boolean; error?: string }>;
         setInputDir: (dir: string | null) => Promise<{ ok: boolean }>;
         setOutputDir: (dir: string | null) => Promise<{ ok: boolean }>;
+      };
+
+      cache: {
+        size: () => Promise<{ ok: boolean; bytes: number; path?: string; error?: string }>;
+        clear: () => Promise<{ ok: boolean; error?: string }>;
       };
     };
   }

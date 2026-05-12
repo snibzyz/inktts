@@ -1,6 +1,10 @@
 // Port ของ AdaptiveLimiter จาก _lib.py
 // Promise-based semaphore ที่หด cap เมื่อ fail ติดกัน, คืนกลับเมื่อ ok ติดกัน
 
+class CancelledError extends Error {
+  constructor(msg = 'cancelled') { super(msg); this.name = 'CancelledError'; this.cancelled = true; }
+}
+
 class AdaptiveLimiter {
   constructor({ initial, minimum = 1, failThreshold = 3, recoverThreshold = 10, label = 'total', onLimit }) {
     this._initial = Math.max(1, Number(initial) || 1);
@@ -14,21 +18,32 @@ class AdaptiveLimiter {
     this._fails = 0;
     this._oks = 0;
     this._waiters = [];
+    this._aborted = false;
   }
 
   get currentMax() { return this._max; }
 
   async acquire() {
     while (this._inUse >= this._max) {
-      await new Promise((r) => this._waiters.push(r));
+      if (this._aborted) throw new CancelledError();
+      await new Promise((resolve, reject) => this._waiters.push({ resolve, reject }));
     }
+    if (this._aborted) throw new CancelledError();
     this._inUse += 1;
   }
 
   release() {
     this._inUse -= 1;
     const next = this._waiters.shift();
-    if (next) next();
+    if (next) next.resolve();
+  }
+
+  // ปลุก waiter ทั้งหมดด้วย CancelledError → fetchOne catch แล้ว flag chunk fail
+  // ป้องกัน Promise.all ค้างยาวเมื่อ user กด Cancel ตอน limiter shrink เหลือเศษเดียว
+  abort() {
+    this._aborted = true;
+    const ws = this._waiters.splice(0);
+    for (const w of ws) w.reject(new CancelledError());
   }
 
   async run(fn) {
@@ -47,7 +62,7 @@ class AdaptiveLimiter {
         this._oks = 0;
         this._onLimit({ label: this._label, kind: 'grow', old, new: this._max, initial: this._initial });
         const next = this._waiters.shift();
-        if (next) next();
+        if (next) next.resolve();
       }
     } else {
       this._oks = 0;
@@ -67,17 +82,25 @@ class Semaphore {
     this._max = Math.max(1, Number.isFinite(max) ? max : 1);
     this._inUse = 0;
     this._waiters = [];
+    this._aborted = false;
   }
   async acquire() {
     while (this._inUse >= this._max) {
-      await new Promise((r) => this._waiters.push(r));
+      if (this._aborted) throw new CancelledError();
+      await new Promise((resolve, reject) => this._waiters.push({ resolve, reject }));
     }
+    if (this._aborted) throw new CancelledError();
     this._inUse += 1;
   }
   release() {
     this._inUse -= 1;
     const next = this._waiters.shift();
-    if (next) next();
+    if (next) next.resolve();
+  }
+  abort() {
+    this._aborted = true;
+    const ws = this._waiters.splice(0);
+    for (const w of ws) w.reject(new CancelledError());
   }
   async run(fn) {
     await this.acquire();
@@ -86,4 +109,4 @@ class Semaphore {
   }
 }
 
-module.exports = { AdaptiveLimiter, Semaphore };
+module.exports = { AdaptiveLimiter, Semaphore, CancelledError };

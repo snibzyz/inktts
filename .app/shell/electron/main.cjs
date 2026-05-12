@@ -19,6 +19,21 @@ const isMac = process.platform === 'darwin';
 
 let mainWindow = null;
 
+// กัน Electron โชว์ default error dialog ("A JavaScript error occurred...")
+// ทุกครั้งที่มี uncaught — โดยเฉพาะตอน TTS รัน parallel chunks 40 ตัวพร้อมกัน
+// แล้วเจอ disk error → popup เด้งรัวจน user ต้อง kill app
+// log ไว้พอ (logger.cjs ก็เขียนไฟล์ inktts.log ให้แล้ว) — process ยังทำงานต่อได้
+process.on('uncaughtException', (err) => {
+  try {
+    log.error('uncaughtException', { error: (err && err.stack) || String(err) });
+  } catch { /* logger เอง crash ก็ห้ามวน */ }
+});
+process.on('unhandledRejection', (reason) => {
+  try {
+    log.error('unhandledRejection', { reason: (reason && reason.stack) || String(reason) });
+  } catch { /* noop */ }
+});
+
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,

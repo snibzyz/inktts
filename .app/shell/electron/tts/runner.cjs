@@ -9,7 +9,7 @@ const { ffmpegConcat } = require('./ffmpeg.cjs');
 const edge = require('./edge.cjs');
 const google = require('./google.cjs');
 const rv = require('./responsivevoice.cjs');
-const { getCacheDir } = require('../helpers/paths.cjs');
+const { getServiceCacheDir } = require('../helpers/paths.cjs');
 
 const ENGINES = { edge, google, rv };
 
@@ -43,6 +43,8 @@ class TTSJob {
     this.cancelled = false;
     this.startTime = Date.now();
     this.stats = { totalFiles: files.length, filesDone: 0, filesFailed: 0, filesSkipped: 0, chunksDone: 0, chunksTotal: 0 };
+    // เก็บ ref limiter/semaphore ทั้งหมดที่ active เพื่อ abort ตอน cancel
+    this._activeLimiters = new Set();
   }
 
   emit(type, data) {
@@ -61,13 +63,23 @@ class TTSJob {
     this.emit('log', { level, message });
   }
 
-  cancel() { this.cancelled = true; }
+  cancel() {
+    this.cancelled = true;
+    // ปลุก waiter ในทุก semaphore/limiter ที่ยังค้าง → fetchOne รับ CancelledError
+    // → flag chunk fail → Promise.all จบ → ไม่ค้างยาวเมื่อ cap shrink มาก
+    for (const lim of this._activeLimiters) {
+      try { lim.abort(); } catch { /* noop */ }
+    }
+  }
 
   async _prepareFile(inputPath, splitFn) {
     const base = path.basename(inputPath, path.extname(inputPath));
     const fmt = this.options.fmt || 'm4a';
     const outputDir = this.options.outputDir;
-    const workdir = path.join(getCacheDir(), this.serviceKey, base);
+    // Shared workdir — ทุก instance อ่านเขียนที่เดียวกัน
+    // chunks เขียนด้วย temp+rename (ใน engine แต่ละตัว) → ไม่มี mid-write collision
+    // chunks ที่ทำไว้แล้วถูก existsSync เช็คใน fetchOne → skip (= auto-resume)
+    const workdir = path.join(getServiceCacheDir(this.serviceKey), base);
     const outputPath = path.join(outputDir, `${base}.${fmt}`);
 
     if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 1024) {
@@ -75,6 +87,16 @@ class TTSJob {
       this.prog(base, 'SKIP', 1, 1);
       return null;
     }
+    // เคลียร์ partial leftover ใน output dir (ffmpeg เขียน <base>.partial-<token>.m4a)
+    // ที่อาจค้างจากครั้งก่อน power loss/kill กลาง concat
+    try {
+      const prefix = `${base}.partial-`;
+      for (const ent of fs.readdirSync(outputDir)) {
+        if (ent.startsWith(prefix) && ent.endsWith(`.${fmt}`)) {
+          try { fs.unlinkSync(path.join(outputDir, ent)); } catch { /* noop */ }
+        }
+      }
+    } catch { /* noop */ }
     let text;
     try {
       text = fs.readFileSync(inputPath, 'utf-8').replace(/^﻿/, '').replace(/\r\n/g, '\n').trim();
@@ -97,6 +119,15 @@ class TTSJob {
     }
     this.stats.chunksTotal += chunks.length;
     fs.mkdirSync(workdir, { recursive: true });
+    // เคลียร์ tmp leftover จาก crash/power loss ครั้งก่อน (`.tmp` / `.partial`)
+    // ไฟล์ .mp3 ที่เสร็จไว้ปล่อยไว้ — fetchOne จะ existsSync เจอแล้ว skip = resume
+    try {
+      for (const ent of fs.readdirSync(workdir)) {
+        if (ent.endsWith('.tmp') || ent.endsWith('.partial')) {
+          try { fs.unlinkSync(path.join(workdir, ent)); } catch { /* noop */ }
+        }
+      }
+    } catch { /* noop */ }
     const chunkPaths = chunks.map((_, i) => path.join(workdir, `${String(i).padStart(6, '0')}.mp3`));
     // PENDING = รอคิว (มี total แล้ว แต่ยังไม่ได้ slot) — UI ใช้แยกจาก WORK
     this.prog(base, 'PENDING', 0, chunks.length);
@@ -118,14 +149,16 @@ class TTSJob {
     } catch (err) {
       this.log('error', `ffmpeg ${state.base}: ${err.message}`);
     }
+    // ลบ list.txt ที่ ffmpeg ใช้ ไม่ต้องค้างเป็นไฟล์ tmp ใน cache
+    try { fs.unlinkSync(listPath); } catch { /* noop */ }
     if (!ok) {
       this.stats.filesFailed += 1;
       this.prog(state.base, 'FFMPEG_FAIL', total, total);
+      // ไม่ลบ chunk — เก็บไว้เผื่อ user รัน retry หรือเปิดใหม่ → resume ได้
       return;
     }
-    if (!this.options.keepChunks) {
-      try { fs.rmSync(state.workdir, { recursive: true, force: true }); } catch { /* noop */ }
-    }
+    // ไม่ลบ chunks หลัง concat สำเร็จ → resume ได้เมื่อรันซ้ำ
+    // user เคลียร์เองผ่านปุ่ม Clear Cache ในหน้า Settings
     this.stats.filesDone += 1;
     this.prog(state.base, 'DONE', total, total);
   }
@@ -158,6 +191,7 @@ class TTSJob {
     const total = state.chunks.length;
     this.prog(state.base, 'WORK', 0, total);
     const fileSem = new Semaphore(filePerFileSemMax);
+    this._activeLimiters.add(fileSem);
     const failedChunks = [];
 
     const maybeFinalize = async () => {
@@ -167,6 +201,7 @@ class TTSJob {
         state.failed = true;
         this.stats.filesFailed += 1;
         this.prog(state.base, 'FAIL', total - failedChunks.length, total);
+        // ไม่ลบ chunk ที่สำเร็จไปแล้ว — เผื่อ user รัน retry หรือเปิดใหม่ → resume ได้
         return;
       }
       if (failedChunks.length) {
@@ -202,7 +237,11 @@ class TTSJob {
       else this.prog(state.base, 'WORK', done, total);
     };
 
-    await Promise.all(state.chunks.map((_, i) => fetchOne(i)));
+    try {
+      await Promise.all(state.chunks.map((_, i) => fetchOne(i)));
+    } finally {
+      this._activeLimiters.delete(fileSem);
+    }
   }
 
   async run() {
@@ -236,8 +275,17 @@ class TTSJob {
       onLimit: (info) => this.emit('limit', info),
     });
     const fileSlot = new Semaphore(batchSize);
+    this._activeLimiters.add(totalLimiter);
+    this._activeLimiters.add(fileSlot);
 
-    await Promise.all(fileStates.map((state) => fileSlot.run(() => this._synthOneFile(state, fetchFn, connsPerFile, totalLimiter))));
+    try {
+      await Promise.all(fileStates.map((state) => fileSlot.run(() => this._synthOneFile(state, fetchFn, connsPerFile, totalLimiter))));
+    } finally {
+      this._activeLimiters.delete(totalLimiter);
+      this._activeLimiters.delete(fileSlot);
+      // ไม่ sweep chunks ทิ้ง — เก็บไว้เป็น cache เพื่อ resume เมื่อรันซ้ำ
+      // ลบเมื่อ user สั่งเองผ่านปุ่ม Clear Cache ใน Settings
+    }
 
     const elapsed = (Date.now() - this.startTime) / 1000;
     this.emit('done', { stats: this.stats, elapsedSec: elapsed, cancelled: this.cancelled });

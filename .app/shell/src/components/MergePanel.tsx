@@ -71,7 +71,7 @@ export function MergePanel() {
 
   const onStart = async () => {
     if (!merge.srcDir || !merge.prefix) {
-      setStatus({ kind: 'warn', message: 'เลือกโฟลเดอร์ต้นทาง + กรอก prefix ก่อน' });
+      setStatus({ kind: 'warn', message: 'เลือกโฟลเดอร์ต้นทาง + กรอกคำนำหน้าชื่อไฟล์ก่อน' });
       return;
     }
     resetLog();

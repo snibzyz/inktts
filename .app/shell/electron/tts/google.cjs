@@ -1,5 +1,6 @@
 // Google Translate TTS — public unofficial endpoint
 const fs = require('node:fs');
+const path = require('node:path');
 const { net } = require('electron');
 
 const ENDPOINT = 'https://translate.google.com/translate_tts';
@@ -18,22 +19,34 @@ function buildUrl({ text, lang }) {
   return `${ENDPOINT}?${qs.toString()}`;
 }
 
-function downloadToBuffer(url, headers) {
+function downloadToBuffer(url, headers, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     const req = net.request({ url, redirect: 'follow' });
     Object.entries(headers).forEach(([k, v]) => req.setHeader(k, v));
     const chunks = [];
+    let settled = false;
+    const settle = (err, buf) => {
+      if (settled) return;
+      settled = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (err) reject(err); else resolve(buf);
+    };
+    // กัน hang ยาวเมื่อ server stall — ถ้าไม่ตอบใน 30s ยกเลิก request → retry รอบใหม่
+    let timer = setTimeout(() => {
+      try { req.abort(); } catch { /* noop */ }
+      settle(new Error('request timeout'));
+    }, timeoutMs);
     req.on('response', (res) => {
       if (res.statusCode >= 400) {
-        reject(new Error(`HTTP ${res.statusCode}`));
+        settle(new Error(`HTTP ${res.statusCode}`));
         res.on('data', () => {});
         return;
       }
       res.on('data', (c) => chunks.push(c));
-      res.on('end', () => resolve(Buffer.concat(chunks)));
-      res.on('error', reject);
+      res.on('end', () => settle(null, Buffer.concat(chunks)));
+      res.on('error', (err) => settle(err));
     });
-    req.on('error', reject);
+    req.on('error', (err) => settle(err));
     req.end();
   });
 }
@@ -50,7 +63,14 @@ async function fetchChunk({ text, outPath, lang = 'th', jitter = 0.1 }) {
   };
   const data = await downloadToBuffer(url, headers);
   if (data.length < 512) throw new Error(`too small (${data.length} bytes)`);
-  fs.writeFileSync(outPath, data);
+  // atomic write — กัน 2 instance เขียน outPath ทับกันกลางทาง
+  const tmpPath = path.join(path.dirname(outPath), `${path.basename(outPath)}.${process.pid}-${Math.random().toString(36).slice(2, 8)}.tmp`);
+  fs.writeFileSync(tmpPath, data);
+  try { fs.renameSync(tmpPath, outPath); }
+  catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch { /* noop */ }
+    throw err;
+  }
 }
 
 const DEFAULT_BATCH_SIZE = 6;

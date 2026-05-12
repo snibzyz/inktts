@@ -333,7 +333,7 @@ export function ServicePanel({ serviceKey }: Props) {
               <div className={cn('text-[12px] flex items-center gap-2', overCap ? 'text-vscode-error' : 'text-vscode-fg-dim')}>
                 <Codicon name={overCap ? 'warning' : 'info'} size={14} />
                 {overCap
-                  ? `TOTAL เกินเพดาน API (${svc.maxTotal}) — ลดจำนวนไฟล์ต่อรอบหรือการเชื่อมต่อต่อไฟล์`
+                  ? `รวมการเชื่อมต่อเกินเพดาน (${svc.maxTotal}) — ลดจำนวนไฟล์ต่อรอบหรือการเชื่อมต่อต่อไฟล์`
                   : `การเชื่อมต่อรวม: ${state.batch} × ${state.conn} = ${totalConn}  (เพดาน ${svc.maxTotal})`}
               </div>
               {svc.fields.filter((f) => f.advanced).map((f) => (

@@ -29,9 +29,46 @@ function getOutputDir() {
   return ensureDir(custom || getDefaultOutputDir());
 }
 
-// Cache อยู่ใน userData ดีกว่า — ไม่กิน disk ที่ workspace user
-function getCacheDir() {
+// Shared cache root — ทุก instance แชร์กัน
+// chunks อยู่ที่ cache/<service>/<base>/<idx>.mp3 → resume ข้าม session ได้
+// 2 instance เขียน chunk เดียวกัน → ใช้ temp file + atomic rename กัน collision
+function getCacheRoot() {
   return ensureDir(path.join(app.getPath('userData'), 'cache'));
+}
+
+function getServiceCacheDir(service) {
+  if (!service || typeof service !== 'string') throw new Error('service required');
+  return ensureDir(path.join(getCacheRoot(), service));
+}
+
+// คำนวณขนาด cache เป็น byte — เดิน recursive ทั้งต้นไม้
+// ใช้สำหรับโชว์ในหน้า Settings ให้ user รู้ว่า cache กินดิสก์เท่าไหร่
+function getCacheSize() {
+  const root = getCacheRoot();
+  let total = 0;
+  const walk = (p) => {
+    let stat;
+    try { stat = fs.statSync(p); } catch { return; }
+    if (stat.isFile()) { total += stat.size; return; }
+    if (!stat.isDirectory()) return;
+    let entries;
+    try { entries = fs.readdirSync(p); } catch { return; }
+    for (const ent of entries) walk(path.join(p, ent));
+  };
+  walk(root);
+  return total;
+}
+
+// ลบ cache ทั้งหมด — เรียกจากปุ่ม "Clear Cache" ใน Settings
+function clearCache() {
+  const root = getCacheRoot();
+  try {
+    const entries = fs.readdirSync(root);
+    for (const ent of entries) {
+      try { fs.rmSync(path.join(root, ent), { recursive: true, force: true }); } catch { /* noop */ }
+    }
+    return true;
+  } catch { return false; }
 }
 
 // ffmpeg-static path — packed inside asar.unpacked or dev node_modules
@@ -49,7 +86,10 @@ module.exports = {
   getAppRoot,
   getInputDir,
   getOutputDir,
-  getCacheDir,
+  getCacheRoot,
+  getServiceCacheDir,
+  getCacheSize,
+  clearCache,
   getFfmpegPath,
   ensureDir,
   getDefaultInputDir,

@@ -1,5 +1,6 @@
 // ResponsiveVoice TTS via texttospeech.responsivevoice.org
 const fs = require('node:fs');
+const path = require('node:path');
 const { net } = require('electron');
 
 const ENDPOINT = 'https://texttospeech.responsivevoice.org/v1/text:synthesize';
@@ -19,42 +20,65 @@ let liveKey = null;
 
 function pickUA() { return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]; }
 
-function fetchText(url, headers) {
+function fetchText(url, headers, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const req = net.request({ url, redirect: 'follow' });
     Object.entries(headers).forEach(([k, v]) => req.setHeader(k, v));
     let body = '';
+    let settled = false;
+    const settle = (err, val) => {
+      if (settled) return;
+      settled = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (err) reject(err); else resolve(val);
+    };
+    let timer = setTimeout(() => {
+      try { req.abort(); } catch { /* noop */ }
+      settle(new Error('homepage fetch timeout'));
+    }, timeoutMs);
     req.on('response', (res) => {
       if (res.statusCode >= 400) {
-        reject(new Error(`HTTP ${res.statusCode}`));
+        settle(new Error(`HTTP ${res.statusCode}`));
         res.on('data', () => {});
         return;
       }
       res.on('data', (c) => { body += c.toString('utf-8'); });
-      res.on('end', () => resolve(body));
-      res.on('error', reject);
+      res.on('end', () => settle(null, body));
+      res.on('error', (err) => settle(err));
     });
-    req.on('error', reject);
+    req.on('error', (err) => settle(err));
     req.end();
   });
 }
 
-function downloadToBuffer(url, headers) {
+function downloadToBuffer(url, headers, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     const req = net.request({ url, redirect: 'follow' });
     Object.entries(headers).forEach(([k, v]) => req.setHeader(k, v));
     const chunks = [];
+    let settled = false;
+    const settle = (err, buf) => {
+      if (settled) return;
+      settled = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (err) reject(err); else resolve(buf);
+    };
+    // กัน RV server hang → retry รอบใหม่แทนที่จะรอ chunk เดียวไม่จบ
+    let timer = setTimeout(() => {
+      try { req.abort(); } catch { /* noop */ }
+      settle(new Error('request timeout'));
+    }, timeoutMs);
     req.on('response', (res) => {
       if (res.statusCode >= 400) {
-        reject(new Error(`HTTP ${res.statusCode}`));
+        settle(new Error(`HTTP ${res.statusCode}`));
         res.on('data', () => {});
         return;
       }
       res.on('data', (c) => chunks.push(c));
-      res.on('end', () => resolve(Buffer.concat(chunks)));
-      res.on('error', reject);
+      res.on('end', () => settle(null, Buffer.concat(chunks)));
+      res.on('error', (err) => settle(err));
     });
-    req.on('error', reject);
+    req.on('error', (err) => settle(err));
     req.end();
   });
 }
@@ -109,7 +133,14 @@ async function fetchChunk({ text, outPath, lang = 'th', gender = 'female', rate 
     'sec-fetch-site': 'same-origin',
   });
   if (!isValidMp3(data)) throw new Error(`invalid mp3 (${data.length} bytes)`);
-  fs.writeFileSync(outPath, data);
+  // atomic write — เหมือนกับ google/edge: tmp file → rename
+  const tmpPath = path.join(path.dirname(outPath), `${path.basename(outPath)}.${process.pid}-${Math.random().toString(36).slice(2, 8)}.tmp`);
+  fs.writeFileSync(tmpPath, data);
+  try { fs.renameSync(tmpPath, outPath); }
+  catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch { /* noop */ }
+    throw err;
+  }
 }
 
 const DEFAULT_BATCH_SIZE = 6;

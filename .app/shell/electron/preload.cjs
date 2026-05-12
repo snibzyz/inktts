@@ -60,4 +60,9 @@ contextBridge.exposeInMainWorld('inktts', {
     setInputDir: (dir) => invoke('settings:setInputDir', dir),
     setOutputDir: (dir) => invoke('settings:setOutputDir', dir),
   },
+
+  cache: {
+    size: () => invoke('cache:size'),
+    clear: () => invoke('cache:clear'),
+  },
 });

@@ -20,6 +20,12 @@ function getStream() {
   if (!p) return null;
   try {
     logStream = fs.createWriteStream(p, { flags: 'a' });
+    // ถ้าเขียน log ไม่ได้ (disk full, file locked) ห้าม throw uncaught —
+    // log แค่ console แล้ว fallback null ครั้งต่อไป
+    logStream.on('error', () => {
+      try { logStream && logStream.destroy(); } catch { /* noop */ }
+      logStream = null;
+    });
     return logStream;
   } catch {
     return null;
