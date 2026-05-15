@@ -110,7 +110,7 @@ declare global {
         exists: (p: string) => Promise<boolean>;
       };
       tts: {
-        start: (payload: { service: ServiceKey; files: string[]; options: Record<string, any> }) => Promise<{ ok: boolean; jobId?: string; outputDir?: string; error?: string }>;
+        start: (payload: { service: ServiceKey; files: string[]; options: Record<string, any>; jobId?: string }) => Promise<{ ok: boolean; jobId?: string; outputDir?: string; error?: string }>;
         cancel: (jobId: string) => Promise<{ ok: boolean; error?: string }>;
         onEvent: (handler: (evt: TtsEvent) => void) => () => void;
       };

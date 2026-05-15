@@ -52,25 +52,42 @@ function compareSemver(a, b) {
   return 0;
 }
 
+// 15 วินาที — GitHub API ปกติตอบใน <2 วิ ถ้าเกินนี้ถือว่า hang
+// (เคยมีเคส: periodic timer 30 นาทียิง checkForUpdates ต่อเนื่อง — ถ้า request แรก hang
+//  ไม่มี timeout → fetchJson ค้างเป็นชั่วโมง รอบใหม่ยิงทับซ้อน → leak Promise ค้าง + อาจถ่วง net stack)
+const JSON_TIMEOUT_MS = 15000;
+
 function fetchJson(url) {
   return new Promise((resolve, reject) => {
     const req = net.request({ url, redirect: 'follow' });
     req.setHeader('Accept', 'application/vnd.github+json');
     req.setHeader('User-Agent', 'INKTTS-updater');
     let body = '';
+    let settled = false;
+    const settle = (err, val) => {
+      if (settled) return;
+      settled = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (err) reject(err); else resolve(val);
+    };
+    let timer = setTimeout(() => {
+      try { req.abort(); } catch { /* noop */ }
+      settle(new Error(`fetchJson timeout (${JSON_TIMEOUT_MS}ms): ${url}`));
+    }, JSON_TIMEOUT_MS);
     req.on('response', (res) => {
       if (res.statusCode >= 400) {
-        reject(new Error(`HTTP ${res.statusCode} ${url}`));
+        settle(new Error(`HTTP ${res.statusCode} ${url}`));
+        res.on('data', () => {});
         return;
       }
       res.on('data', (c) => { body += c.toString('utf-8'); });
       res.on('end', () => {
-        try { resolve(JSON.parse(body)); }
-        catch (err) { reject(err); }
+        try { settle(null, JSON.parse(body)); }
+        catch (err) { settle(err); }
       });
-      res.on('error', reject);
+      res.on('error', (err) => settle(err));
     });
-    req.on('error', reject);
+    req.on('error', (err) => settle(err));
     req.end();
   });
 }

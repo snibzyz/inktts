@@ -32,8 +32,14 @@ export function ServicePanel({ serviceKey }: Props) {
   const [globFiles, setGlobFiles] = useState<string[]>([]);
 
   useEffect(() => {
+    // อ่าน jobId ผ่าน getState ทุกครั้งที่ event เข้า — ไม่ใช่จาก closure
+    // เหตุผล: ตอน job เริ่ม runner emit event sync ก่อน IPC reply กลับมาที่ renderer
+    //         ถ้า capture จาก closure จะได้ค่าเก่า (null) → filter ทิ้ง event "SKIP" ของไฟล์
+    //         ที่ output เสร็จไว้แล้ว → row ติด PENDING ตลอด (อาการ "ค้าง 3000+ วิ")
+    //         renderer ตอนนี้ pre-set state.jobId ก่อนยิง IPC → getState ได้ค่าใหม่ทัน
     const off = window.inktts.tts.onEvent((evt: TtsEvent) => {
-      if (evt.jobId !== state.jobId) return;
+      const currentJobId = useStore.getState().services[serviceKey].jobId;
+      if (evt.jobId !== currentJobId) return;
       if (evt.type === 'start') {
         // Runner just acquired a slot for this file — start the actual timer
         patchRow(serviceKey, evt.fileBase, { startTime: Date.now(), endTime: undefined });
@@ -68,7 +74,7 @@ export function ServicePanel({ serviceKey }: Props) {
       }
     });
     return off;
-  }, [state.jobId, serviceKey]);
+  }, [serviceKey]);
 
   const resolvedFiles = useMemo(() => {
     if (state.selectedFiles.length) return state.selectedFiles;
@@ -126,17 +132,22 @@ export function ServicePanel({ serviceKey }: Props) {
       const base = f.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, '');
       upsertRow(serviceKey, { base, status: 'PENDING', done: 0, total: 1, startTime: null });
     });
+    // pre-set jobId ก่อนยิง IPC → runner emit event ช่วง sync prelude (log+SKIP/PENDING ไฟล์แรก)
+    // จะ match jobId ทันที ไม่หล่นในช่วงระหว่าง IPC reply กับ React setState
+    const localJobId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    updateService(serviceKey, { jobId: localJobId, startTime: Date.now(), lastRunFiles: effectiveFiles });
     const opts = buildOptionsFromFields(svc, state.fieldValues);
     const result = await window.inktts.tts.start({
       service: serviceKey,
       files: effectiveFiles,
       options: { ...opts, batchSize: state.batch, connectionsPerFile: state.conn },
+      jobId: localJobId,
     });
     if (!result.ok) {
+      updateService(serviceKey, { jobId: null });
       setStatus({ kind: 'fail', message: result.error || 'เริ่มงานไม่สำเร็จ' });
       return;
     }
-    updateService(serviceKey, { jobId: result.jobId!, startTime: Date.now(), lastRunFiles: effectiveFiles });
     setStatus({ kind: 'run', message: `กำลังแปลง ${svc.name} · ${effectiveFiles.length} ไฟล์` });
   };
 
@@ -160,17 +171,21 @@ export function ServicePanel({ serviceKey }: Props) {
     failedBases.forEach((base) => {
       patchRow(serviceKey, base, { status: 'PENDING', done: 0, total: 1, startTime: null, endTime: undefined });
     });
+    // pre-set jobId เหมือน onStart — กัน event หล่นช่วง sync prelude
+    const localJobId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    updateService(serviceKey, { jobId: localJobId, startTime: Date.now() });
     const opts = buildOptionsFromFields(svc, state.fieldValues);
     const result = await window.inktts.tts.start({
       service: serviceKey,
       files: retryFiles,
       options: { ...opts, batchSize: state.batch, connectionsPerFile: state.conn },
+      jobId: localJobId,
     });
     if (!result.ok) {
+      updateService(serviceKey, { jobId: null });
       setStatus({ kind: 'fail', message: result.error || 'ลองใหม่ไม่สำเร็จ' });
       return;
     }
-    updateService(serviceKey, { jobId: result.jobId!, startTime: Date.now() });
     setStatus({ kind: 'run', message: `กำลังลองใหม่ ${retryFiles.length} ไฟล์ที่ล้มเหลว` });
   };
 

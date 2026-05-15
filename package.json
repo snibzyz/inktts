@@ -1,6 +1,6 @@
 {
   "name": "inktts-workspace",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "private": true,
   "description": "INKTTS — Thai batch text-to-speech desktop app",
   "scripts": {
@@ -9,6 +9,8 @@
     "test": "pnpm --filter @inktts/desktop-shell test",
     "package:win": "pnpm --filter @inktts/desktop-shell package:win",
     "publish:win": "pnpm --filter @inktts/desktop-shell publish:win",
+    "package:mac": "pnpm --filter @inktts/desktop-shell package:mac",
+    "publish:mac": "pnpm --filter @inktts/desktop-shell publish:mac",
     "release": "node scripts/release.mjs",
     "verify:release": "node scripts/verify-release.mjs"
   },
@@ -19,7 +21,7 @@
     "tts",
     "thai"
   ],
-  "author": "INKTTS",
+  "author": "INKREALM",
   "license": "MIT",
   "pnpm": {
     "onlyBuiltDependencies": [

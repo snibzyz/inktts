@@ -45,6 +45,9 @@ class TTSJob {
     this.stats = { totalFiles: files.length, filesDone: 0, filesFailed: 0, filesSkipped: 0, chunksDone: 0, chunksTotal: 0 };
     // เก็บ ref limiter/semaphore ทั้งหมดที่ active เพื่อ abort ตอน cancel
     this._activeLimiters = new Set();
+    // wakers สำหรับ cancellable sleep — cancel() จะ reject ทุก sleep ที่ค้าง
+    // → กด Stop ตอน backoff (สูงสุด 32 วิ) ก็หยุดทันที ไม่ต้องรอจบรอบ
+    this._sleepWakers = new Set();
   }
 
   emit(type, data) {
@@ -70,6 +73,30 @@ class TTSJob {
     for (const lim of this._activeLimiters) {
       try { lim.abort(); } catch { /* noop */ }
     }
+    // ปลุก backoff sleep ทุกตัว → _fetchWithRetry รับ throw → catch ที่ fetchOne
+    // → ไม่งั้น cancel ตอน sleep ระหว่าง retry รอบสุดท้าย = รอ 32 วินาที
+    for (const wake of this._sleepWakers) {
+      try { wake(); } catch { /* noop */ }
+    }
+    this._sleepWakers.clear();
+  }
+
+  // sleep ที่ cancel ปลุกได้ — register waker ไว้ใน job แล้ว cancel() เรียก wake() เพื่อ reject
+  _sleep(ms) {
+    if (this.cancelled) return Promise.reject(new Error('cancelled'));
+    return new Promise((resolve, reject) => {
+      let waker;
+      const t = setTimeout(() => {
+        this._sleepWakers.delete(waker);
+        resolve();
+      }, ms);
+      waker = () => {
+        clearTimeout(t);
+        this._sleepWakers.delete(waker);
+        reject(new Error('cancelled'));
+      };
+      this._sleepWakers.add(waker);
+    });
   }
 
   async _prepareFile(inputPath, splitFn) {
@@ -178,7 +205,8 @@ class TTSJob {
         }
       }
       if (i < retries - 1) {
-        await new Promise((r) => setTimeout(r, 2 ** i * 1000));
+        // cancellable: cancel() ปลุก sleep → throw 'cancelled' → catch ออกจาก loop
+        await this._sleep(2 ** i * 1000);
       }
     }
     throw lastErr;

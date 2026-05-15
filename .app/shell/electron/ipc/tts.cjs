@@ -12,12 +12,15 @@ let nextJobId = 0;
 
 function registerTtsIpc(getMainWindow) {
   ipcMain.handle('tts:start', async (_e, payload) => {
-    const { service, files, options } = payload || {};
+    const { service, files, options, jobId: clientJobId } = payload || {};
     if (!service || !Array.isArray(files) || !files.length) {
       return { ok: false, error: 'missing service / files' };
     }
     const outputDir = options?.outputDir || path.join(getOutputDir(), service === 'rv' ? 'responsivevoice' : service);
-    const jobId = String(++nextJobId);
+    // รับ jobId จาก renderer เพื่อกัน race: renderer set state.jobId ไว้ก่อน IPC reply
+    // → ทุก event ที่ runner emit ระหว่าง sync prelude (log, prog SKIP/PENDING ของไฟล์แรก)
+    //   จะ match jobId ที่ renderer ตั้งไว้แล้ว → ไม่หล่นในช่วง pre-reply
+    const jobId = (typeof clientJobId === 'string' && clientJobId) ? clientJobId : String(++nextJobId);
     const job = new TTSJob({
       jobId,
       serviceKey: service,

@@ -3,11 +3,21 @@ const fs = require('node:fs');
 const { app } = require('electron');
 const settings = require('./settings.cjs');
 
-// "App root" — โฟลเดอร์ข้าง .exe (portable) หรือ workspace dir (dev)
+// "App root" — โฟลเดอร์ที่ user ใช้เก็บ input/output
+// — portable Win:    ข้าง .exe (writable แน่ ๆ)
+// — dev:             workspace dir
+// — NSIS-installed:  Program Files (read-only ปกติ) → ใช้ Documents/INKTTS แทน
+// — Mac .app:        Contents/MacOS อยู่ใน app bundle (read-only) → ใช้ Documents/INKTTS แทน
 function getAppRoot() {
   if (process.env.PORTABLE_EXECUTABLE_DIR) return process.env.PORTABLE_EXECUTABLE_DIR;
-  if (app.isPackaged) return path.dirname(process.execPath);
-  return path.resolve(__dirname, '..', '..', '..', '..');
+  if (!app.isPackaged) return path.resolve(__dirname, '..', '..', '..', '..');
+  // packaged แต่ไม่ใช่ portable: ใช้ ~/Documents/INKTTS เพื่อให้เขียนได้ทั่วทั้ง user
+  // (ก่อนหน้านี้ใช้ path.dirname(process.execPath) → Program Files / .app/Contents = read-only)
+  try {
+    return path.join(app.getPath('documents'), 'INKTTS');
+  } catch {
+    return path.dirname(process.execPath);
+  }
 }
 
 function ensureDir(p) {
@@ -15,7 +25,7 @@ function ensureDir(p) {
   return p;
 }
 
-// Default = ข้าง .exe — user ทับด้วย settings.json ได้
+// Default = ข้าง .exe (portable) / Documents/INKTTS (installed) — user ทับด้วย settings.json ได้
 function getDefaultInputDir() { return path.join(getAppRoot(), 'input'); }
 function getDefaultOutputDir() { return path.join(getAppRoot(), 'output'); }
 

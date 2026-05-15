@@ -84,9 +84,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Mac builds split per arch — ffmpeg-static@5.3.0 ดาวน์โหลด binary เดียวต่อ install
+  # ตาม host arch → ห้าม cross-build (arm64 host ไม่สามารถสร้าง x64 dmg ที่มี x64 ffmpeg)
+  # → ใช้ macos-13 (Intel) สำหรับ x64 และ macos-latest (Apple Silicon) สำหรับ arm64
+  # → แต่ละ runner ติดตั้ง ffmpeg-static ของ arch ตัวเอง = ถูกชิป
   package-mac:
-    name: Package macOS dmg
-    runs-on: macos-latest
+    name: Package macOS dmg (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: macos-13
+          - arch: arm64
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -121,13 +133,36 @@ jobs:
             echo "  $f -> $(node -e "console.log(require('./$f').version)")"
           done
 
+      - name: Verify ffmpeg-static arch + runtime works
+        shell: bash
+        run: |
+          set -euo pipefail
+          FFMPEG="$(node -p "require('ffmpeg-static')")"
+          echo "ffmpeg path: $FFMPEG"
+          [ -f "$FFMPEG" ] || { echo "ERROR: ffmpeg-static binary not found"; exit 1; }
+          chmod +x "$FFMPEG" 2>/dev/null || true
+          ARCH_INFO="$(file "$FFMPEG")"
+          echo "file info: $ARCH_INFO"
+          case "${{ matrix.arch }}" in
+            x64)   echo "$ARCH_INFO" | grep -E "x86_64" || { echo "FAIL: expected x86_64 ffmpeg"; exit 1; } ;;
+            arm64) echo "$ARCH_INFO" | grep -E "arm64"  || { echo "FAIL: expected arm64 ffmpeg";  exit 1; } ;;
+          esac
+          # Runtime check — spawn จริงเพื่อพิสูจน์ binary รันได้ (not just file metadata)
+          echo "--- ffmpeg -version ---"
+          "$FFMPEG" -version | head -3
+          echo "--- ffmpeg encode test (sine → m4a) ---"
+          "$FFMPEG" -nostdin -y -f lavfi -i "sine=frequency=440:duration=0.5" -c:a aac /tmp/_test.m4a 2>&1 | tail -3
+          [ -s /tmp/_test.m4a ] || { echo "FAIL: ffmpeg encode produced empty file"; exit 1; }
+          echo "ffmpeg encode test passed ($(wc -c < /tmp/_test.m4a) bytes)"
+          rm -f /tmp/_test.m4a
+
       - name: Build renderer
         working-directory: .app/shell
         run: pnpm build
 
-      - name: Package macOS dmg (unsigned, x64+arm64)
+      - name: Package macOS dmg (unsigned)
         working-directory: .app/shell
-        run: pnpm exec electron-builder --mac dmg --x64 --arm64 --publish never
+        run: pnpm exec electron-builder --mac dmg --${{ matrix.arch }} --publish never
         env:
           # ปิด code signing — ไม่มี Apple Developer cert
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'

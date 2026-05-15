@@ -104,7 +104,8 @@ app.whenReady().then(() => {
   autoUpdate.registerIpc();
 
   createMainWindow();
-  autoUpdate.start(mainWindow);
+  // ส่ง getter — บน Mac ถ้า user ปิดแล้วเปิดใหม่ window instance จะใหม่ getter ดึงตัวล่าสุดได้
+  autoUpdate.start(() => mainWindow);
   log.info('app ready', { isDev, version: app.getVersion() });
 
   app.on('activate', () => {

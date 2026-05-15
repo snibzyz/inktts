@@ -25,14 +25,26 @@ function makeTmpPath(outPath) {
   return path.join(dir, `${base}.${process.pid}-${Math.random().toString(36).slice(2, 8)}.tmp`);
 }
 
+// ครอบ Promise ด้วย timeout — ถ้าเกินก็ throw แทนรอชั่วนิรันดร์
+// — setMetadata/toStream เป็น WebSocket ทั้งคู่ ถ้า server หรือ network drop ตอนเปิดคอน
+//   จะค้างทั้ง chunk → กิน slot ใน fileSem ไม่ปล่อย → ทั้งไฟล์ค้าง progress ไม่ขยับ
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function fetchChunk({ text, outPath, voice = 'th-TH-PremwadeeNeural', rate = '+30%' }) {
   if (!MsEdgeTTS) throw new Error('msedge-tts not installed');
   const tts = new MsEdgeTTS();
+  try {
   // msedge-tts v2: setMetadata รับแค่ voice + format (ไม่มี rate ใน MetadataOptions)
   // rate / pitch / volume ต้องส่งให้ toStream(text, ProsodyOptions) ต่างหาก
   // ของเดิมส่ง rate ให้ setMetadata → ถูก ignore → Edge เร็วเท่า default ทุกครั้ง (bug v2.0.0)
-  await tts.setMetadata(voice, 'audio-24khz-48kbitrate-mono-mp3');
-  const result = await tts.toStream(text, { rate: rateToString(rate) });
+  await withTimeout(tts.setMetadata(voice, 'audio-24khz-48kbitrate-mono-mp3'), 15000, 'edge setMetadata');
+  const result = await withTimeout(tts.toStream(text, { rate: rateToString(rate) }), 15000, 'edge toStream');
   const stream = result?.audioStream || result;
   const tmpPath = makeTmpPath(outPath);
   await new Promise((resolve, reject) => {
@@ -88,6 +100,12 @@ async function fetchChunk({ text, outPath, voice = 'th-TH-PremwadeeNeural', rate
     // ลบ tmp ทิ้งแล้ว throw — runner รับ retry
     try { fs.unlinkSync(tmpPath); } catch { /* noop */ }
     throw err;
+  }
+  } finally {
+    // ปิด WebSocket connection — msedge-tts v2 ไม่ auto-close หลัง stream end
+    // ถ้าไม่ปิด: 1 chunk = 1 WS leak → batch 50 chunks/sec = หมด socket pool ใน 1-2 นาที
+    // มี try/catch รอบ ๆ เพราะบางเวอร์ชันไม่มี close() method
+    try { tts.close?.(); } catch { /* noop */ }
   }
 }
 

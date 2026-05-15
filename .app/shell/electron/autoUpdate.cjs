@@ -7,7 +7,9 @@ const { createLogger } = require('./helpers/logger.cjs');
 
 const log = createLogger('autoupdate');
 
-let mainWindowRef = null;
+// เก็บ getter ไม่ใช่ window ตรง ๆ — บน Mac ถ้า user ปิดแล้วเปิดใหม่ window จะถูกสร้าง instance ใหม่
+// แต่ ref เดิมชี้ instance ที่ destroyed แล้ว → checkForUpdates เด้ง banner ใส่ window เก่าทุกครั้ง
+let getMainWindow = () => null;
 let pendingUpdate = null;
 let periodicTimer = null;
 const PERIODIC_MS = 30 * 60 * 1000; // ทุก 30 นาที
@@ -103,8 +105,10 @@ async function checkOnce(mainWindow, prefetchedResult) {
   }
 }
 
-function start(mainWindow) {
-  mainWindowRef = mainWindow;
+function start(getMainWindowFn) {
+  // รับ getter callback แทน window object เพื่อให้แต่ละ check ดึง window ปัจจุบัน (Mac re-create case)
+  if (typeof getMainWindowFn === 'function') getMainWindow = getMainWindowFn;
+  else getMainWindow = () => getMainWindowFn; // backwards compat ถ้าใครส่ง window มาตรง ๆ
   if (process.env.NODE_ENV === 'development') {
     log.info('auto-update disabled in dev');
     return;
@@ -119,11 +123,11 @@ function start(mainWindow) {
 
   // ครั้งแรกหลัง 5 วิ (รอ UI พร้อม)
   setTimeout(() => {
-    checkOnce(mainWindow).catch((err) => log.warn('first check failed', { error: err && err.message }));
+    checkOnce(getMainWindow()).catch((err) => log.warn('first check failed', { error: err && err.message }));
   }, 5000);
   if (periodicTimer) clearInterval(periodicTimer);
   periodicTimer = setInterval(() => {
-    checkOnce(mainWindow).catch((err) => log.warn('periodic check failed', { error: err && err.message }));
+    checkOnce(getMainWindow()).catch((err) => log.warn('periodic check failed', { error: err && err.message }));
   }, PERIODIC_MS);
 }
 
@@ -138,7 +142,7 @@ function registerIpc() {
     // ก่อน return ให้ renderer — fire-and-forget เพื่อไม่ block ปุ่ม
     const previewResult = await portable.checkForUpdates();
     if (previewResult && previewResult.available && !_staging) {
-      checkOnce(mainWindowRef, previewResult).catch((err) => log.warn('manual checkOnce failed', { error: err && err.message }));
+      checkOnce(getMainWindow(), previewResult).catch((err) => log.warn('manual checkOnce failed', { error: err && err.message }));
     }
     return { ok: true, result: previewResult };
   });
@@ -161,7 +165,7 @@ function registerIpc() {
     // fallback: stage + apply (สำหรับกรณีไม่มี marker — เช่น stage failed ก่อนหน้า)
     _staging = true;
     try {
-      await portable.downloadAndApply(pendingUpdate.downloadUrl, pendingUpdate.latest, mainWindowRef);
+      await portable.downloadAndApply(pendingUpdate.downloadUrl, pendingUpdate.latest, getMainWindow());
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err && err.message };
