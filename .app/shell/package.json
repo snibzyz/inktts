@@ -21,8 +21,8 @@
     "smoke:merge": "node electron/__tests__/smoke-merge.cjs",
     "package:win": "pnpm build && electron-builder --win nsis portable",
     "publish:win": "pnpm build && electron-builder --win nsis portable --publish always",
-    "package:mac": "pnpm build && electron-builder --mac dmg",
-    "publish:mac": "pnpm build && electron-builder --mac dmg --publish always"
+    "package:mac": "pnpm build && electron-builder --mac dmg zip",
+    "publish:mac": "pnpm build && electron-builder --mac dmg zip --publish always"
   },
   "dependencies": {
     "@vscode/codicons": "^0.0.45",
@@ -102,6 +102,13 @@
       "target": [
         {
           "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
           "arch": [
             "x64",
             "arm64"

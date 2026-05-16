@@ -3,6 +3,7 @@
 
 const { ipcMain, app } = require('electron');
 const portable = require('./portableUpdate.cjs');
+const macUpdater = require('./macUpdate.cjs');
 const { createLogger } = require('./helpers/logger.cjs');
 
 const log = createLogger('autoupdate');
@@ -11,6 +12,7 @@ const log = createLogger('autoupdate');
 // แต่ ref เดิมชี้ instance ที่ destroyed แล้ว → checkForUpdates เด้ง banner ใส่ window เก่าทุกครั้ง
 let getMainWindow = () => null;
 let pendingUpdate = null;
+let pendingMacUpdate = null;
 let periodicTimer = null;
 const PERIODIC_MS = 30 * 60 * 1000; // ทุก 30 นาที
 
@@ -18,6 +20,33 @@ const PERIODIC_MS = 30 * 60 * 1000; // ทุก 30 นาที
 //   1. periodic poll ทำงานซ้อน (poll N+1 ระหว่าง stage ของ poll N ยังไม่เสร็จ)
 //   2. re-stage รุ่นเดียวที่ apply ค้างอยู่แล้ว (banner เด้งทุก 30 นาที)
 let _staging = false;
+
+// All current INK mac builds ship ad-hoc signed. Squirrel.Mac requires Apple
+// Developer ID signature for auto-update verification — ad-hoc fails silently.
+// macUpdate.cjs does a manual zip swap (mirrors portableUpdate.cjs for Win).
+function useMacCustomUpdater() {
+  return macUpdater.isMacPackaged();
+}
+
+async function checkMacOnce(mainWindow) {
+  const result = await macUpdater.checkForUpdates();
+  if (!result || !result.available) {
+    log.info('no mac update');
+    return;
+  }
+  pendingMacUpdate = result;
+  log.info('mac update available', { version: result.latest });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('app:updateAvailable', {
+      mode: 'portable',
+      version: result.latest,
+      current: result.current,
+      downloadUrl: result.downloadUrl,
+      releaseUrl: result.releaseUrl,
+      releaseDate: result.releaseDate,
+    });
+  }
+}
 
 async function checkOnce(mainWindow, prefetchedResult) {
   if (_staging) {
@@ -113,6 +142,17 @@ function start(getMainWindowFn) {
     log.info('auto-update disabled in dev');
     return;
   }
+  if (useMacCustomUpdater()) {
+    log.info('mac mode — using custom updater (ad-hoc signed builds)');
+    setTimeout(() => {
+      checkMacOnce(getMainWindow()).catch((err) => log.warn('first mac check failed', { error: err && err.message }));
+    }, 5000);
+    if (periodicTimer) clearInterval(periodicTimer);
+    periodicTimer = setInterval(() => {
+      checkMacOnce(getMainWindow()).catch((err) => log.warn('periodic mac check failed', { error: err && err.message }));
+    }, PERIODIC_MS);
+    return;
+  }
   if (!portable.isPortableWin() && !portable.isMac() && !portable.isInstalledWin()) {
     log.info('update check unsupported on this platform/mode', { platform: process.platform });
     return;
@@ -137,6 +177,11 @@ function registerIpc() {
   // silent stage download → app:updateDownloaded
   ipcMain.handle('app:checkUpdate', async () => {
     if (process.env.NODE_ENV === 'development') return { ok: false, error: 'disabled in dev' };
+    if (useMacCustomUpdater()) {
+      const result = await macUpdater.checkForUpdates();
+      if (result && result.available) pendingMacUpdate = result;
+      return { ok: true, result };
+    }
     if (!portable.isPortableWin() && !portable.isMac() && !portable.isInstalledWin()) return { ok: false, error: 'platform not supported' };
     // เรียก checkOnce ที่จัดการ stage flow + IPC events เอง
     // ก่อน return ให้ renderer — fire-and-forget เพื่อไม่ block ปุ่ม
@@ -148,6 +193,15 @@ function registerIpc() {
   });
 
   ipcMain.handle('app:applyUpdate', async () => {
+    if (useMacCustomUpdater()) {
+      if (!pendingMacUpdate) return { ok: false, error: 'no pending update' };
+      try {
+        await macUpdater.downloadAndApply(pendingMacUpdate.downloadUrl, pendingMacUpdate.latest, getMainWindow());
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err && err.message };
+      }
+    }
     if (!portable.canAutoApply()) return { ok: false, error: 'auto-apply not supported on this platform' };
     // ห้าม apply ระหว่าง silent stage ยังไม่เสร็จ — UI ก็ blocked อยู่แล้ว
     // แต่กันไว้กรณี IPC ถูกเรียกตรง ๆ

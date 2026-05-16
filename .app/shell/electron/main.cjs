@@ -17,6 +17,13 @@ const log = createLogger('main');
 const isDev = process.env.NODE_ENV === 'development';
 const isMac = process.platform === 'darwin';
 
+// Windows: bind taskbar + toast notifications to our AUMID so they show
+// "INKTTS" (with our icon) instead of "electron.exe" / generic "Electron".
+// Must run before any BrowserWindow is created. Linux/mac use bundle id.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.inktts.app');
+}
+
 let mainWindow = null;
 
 // กัน Electron โชว์ default error dialog ("A JavaScript error occurred...")
