@@ -12,9 +12,9 @@ permissions:
 # INKTTS auto-update flow:
 #   - Win portable: built on windows-latest → portableUpdate.cjs polls /releases/latest API
 #                   every 30 min → silent stage + helper-cmd swap on quit
-#   - Mac (unsigned dmg): built on macos-latest → same poll → notification-only (user clicks
-#                          banner to open releases page; Gatekeeper requires "right-click → Open"
-#                          on first launch since we don't sign/notarize)
+#   - Mac (unsigned dmg): built on macos-latest (arm64) — cross-build x64 ด้วย
+#                          npm_config_arch=x64 → ffmpeg-static download x64 binary
+#                          ตอน install → Gatekeeper: user ต้อง "right-click → Open" รอบแรก
 jobs:
   package-win:
     name: Package Windows portable
@@ -53,6 +53,26 @@ jobs:
             echo "  $f -> $(node -e "console.log(require('./$f').version)")"
           done
 
+      - name: Verify ffmpeg-static binary present + runtime works
+        shell: bash
+        working-directory: .app/shell
+        run: |
+          set -euo pipefail
+          FFMPEG="$(node -p "require('ffmpeg-static')")"
+          echo "ffmpeg path: $FFMPEG"
+          [ -f "$FFMPEG" ] || { echo "ERROR: ffmpeg-static binary not found at $FFMPEG"; exit 1; }
+          SIZE="$(wc -c < "$FFMPEG")"
+          echo "size: $SIZE bytes"
+          [ "$SIZE" -gt 1000000 ] || { echo "FAIL: ffmpeg binary < 1MB ($SIZE) — download corrupted"; exit 1; }
+          # Runtime — spawn จริงพิสูจน์ binary รันได้
+          echo "--- ffmpeg -version ---"
+          "$FFMPEG" -version | head -3
+          echo "--- encode test (sine → m4a) ---"
+          "$FFMPEG" -nostdin -y -f lavfi -i "sine=frequency=440:duration=0.5" -c:a aac _test.m4a
+          [ -s _test.m4a ] || { echo "FAIL: encode produced empty file"; exit 1; }
+          echo "encode test passed ($(wc -c < _test.m4a) bytes)"
+          rm -f _test.m4a
+
       - name: Build renderer
         working-directory: .app/shell
         run: pnpm build
@@ -60,6 +80,24 @@ jobs:
       - name: Package Windows portable
         working-directory: .app/shell
         run: pnpm exec electron-builder --win portable --publish never
+
+      - name: Verify ffmpeg actually embedded in packaged app
+        shell: bash
+        working-directory: .app/shell
+        run: |
+          set -euo pipefail
+          # portable .exe คือ self-extracting archive ของ electron-builder
+          # ใช้ unpacked dir ที่ electron-builder วางไว้ก่อน wrap เป็น .exe
+          UNPACKED=$(find release -maxdepth 3 -type d -name "win-unpacked" | head -1)
+          [ -n "$UNPACKED" ] || { echo "FAIL: ไม่พบ win-unpacked directory"; ls -la release; exit 1; }
+          FFMPEG="$UNPACKED/resources/app.asar.unpacked/node_modules/ffmpeg-static/ffmpeg.exe"
+          echo "checking: $FFMPEG"
+          [ -f "$FFMPEG" ] || { echo "FAIL: ffmpeg.exe ไม่ถูก embed ใน app.asar.unpacked"; find "$UNPACKED" -name "ffmpeg*" -type f; exit 1; }
+          SIZE="$(wc -c < "$FFMPEG")"
+          [ "$SIZE" -gt 1000000 ] || { echo "FAIL: embedded ffmpeg.exe < 1MB ($SIZE)"; exit 1; }
+          echo "OK: embedded ffmpeg.exe ($SIZE bytes)"
+          # spawn จริง — Windows runner เป็น x64 รัน .exe ได้ตรงๆ
+          "$FFMPEG" -version | head -1
 
       - name: Create download alias (latest)
         shell: bash
@@ -84,10 +122,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Mac builds split per arch — ffmpeg-static@5.3.0 ดาวน์โหลด binary เดียวต่อ install
-  # ตาม host arch → ห้าม cross-build (arm64 host ไม่สามารถสร้าง x64 dmg ที่มี x64 ffmpeg)
-  # → ใช้ macos-13 (Intel) สำหรับ x64 และ macos-latest (Apple Silicon) สำหรับ arm64
-  # → แต่ละ runner ติดตั้ง ffmpeg-static ของ arch ตัวเอง = ถูกชิป
+  # Mac: ใช้ macos-latest (arm64 — Intel runners ถูก deprecate)
+  # ทั้ง 2 arch — cross-build x64 ด้วย npm_config_arch=x64 ก่อน install
+  # → ffmpeg-static install.js อ่าน env นี้แล้วโหลด binary ตามที่กำหนด
   package-mac:
     name: Package macOS dmg (${{ matrix.arch }})
     strategy:
@@ -95,10 +132,8 @@ jobs:
       matrix:
         include:
           - arch: x64
-            runner: macos-13
           - arch: arm64
-            runner: macos-latest
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -114,7 +149,11 @@ jobs:
           node-version: 20
           cache: 'pnpm'
 
-      - name: Install dependencies
+      - name: Install dependencies (force ffmpeg-static arch = ${{ matrix.arch }})
+        env:
+          # ffmpeg-static@5.x install.js: const arch = process.env.npm_config_arch || os.arch();
+          # → ใช้ตัวนี้ทำ cross-arch download (x64 binary บน arm64 runner)
+          npm_config_arch: ${{ matrix.arch }}
         run: pnpm install --frozen-lockfile
 
       - name: Sync version with tag
@@ -133,28 +172,37 @@ jobs:
             echo "  $f -> $(node -e "console.log(require('./$f').version)")"
           done
 
-      - name: Verify ffmpeg-static arch + runtime works
+      - name: Verify ffmpeg-static arch + runtime
         shell: bash
+        working-directory: .app/shell
         run: |
           set -euo pipefail
           FFMPEG="$(node -p "require('ffmpeg-static')")"
           echo "ffmpeg path: $FFMPEG"
-          [ -f "$FFMPEG" ] || { echo "ERROR: ffmpeg-static binary not found"; exit 1; }
+          [ -f "$FFMPEG" ] || { echo "FAIL: ffmpeg-static binary not found at $FFMPEG"; exit 1; }
+          SIZE="$(wc -c < "$FFMPEG")"
+          [ "$SIZE" -gt 1000000 ] || { echo "FAIL: ffmpeg binary < 1MB ($SIZE)"; exit 1; }
           chmod +x "$FFMPEG" 2>/dev/null || true
           ARCH_INFO="$(file "$FFMPEG")"
           echo "file info: $ARCH_INFO"
           case "${{ matrix.arch }}" in
-            x64)   echo "$ARCH_INFO" | grep -E "x86_64" || { echo "FAIL: expected x86_64 ffmpeg"; exit 1; } ;;
-            arm64) echo "$ARCH_INFO" | grep -E "arm64"  || { echo "FAIL: expected arm64 ffmpeg";  exit 1; } ;;
+            x64)   echo "$ARCH_INFO" | grep -q "x86_64" || { echo "FAIL: expected x86_64 ffmpeg"; exit 1; } ;;
+            arm64) echo "$ARCH_INFO" | grep -q "arm64"  || { echo "FAIL: expected arm64 ffmpeg";  exit 1; } ;;
           esac
-          # Runtime check — spawn จริงเพื่อพิสูจน์ binary รันได้ (not just file metadata)
-          echo "--- ffmpeg -version ---"
-          "$FFMPEG" -version | head -3
-          echo "--- ffmpeg encode test (sine → m4a) ---"
-          "$FFMPEG" -nostdin -y -f lavfi -i "sine=frequency=440:duration=0.5" -c:a aac /tmp/_test.m4a 2>&1 | tail -3
-          [ -s /tmp/_test.m4a ] || { echo "FAIL: ffmpeg encode produced empty file"; exit 1; }
-          echo "ffmpeg encode test passed ($(wc -c < /tmp/_test.m4a) bytes)"
-          rm -f /tmp/_test.m4a
+          # Runtime spawn — รันได้เฉพาะเมื่อ binary arch ตรงกับ host arch
+          HOST_ARCH="$(uname -m)"
+          BIN_ARCH="${{ matrix.arch }}"
+          if { [ "$BIN_ARCH" = "arm64" ] && [ "$HOST_ARCH" = "arm64" ]; } || \
+             { [ "$BIN_ARCH" = "x64" ]   && [ "$HOST_ARCH" = "x86_64" ]; }; then
+            echo "--- ffmpeg -version (native) ---"
+            "$FFMPEG" -version | head -3
+            "$FFMPEG" -nostdin -y -f lavfi -i "sine=frequency=440:duration=0.5" -c:a aac _test.m4a
+            [ -s _test.m4a ] || { echo "FAIL: encode produced empty file"; exit 1; }
+            echo "encode test passed ($(wc -c < _test.m4a) bytes)"
+            rm -f _test.m4a
+          else
+            echo "skip runtime: cross-arch ($BIN_ARCH binary on $HOST_ARCH host)"
+          fi
 
       - name: Build renderer
         working-directory: .app/shell
@@ -162,10 +210,33 @@ jobs:
 
       - name: Package macOS dmg (unsigned)
         working-directory: .app/shell
-        run: pnpm exec electron-builder --mac dmg --${{ matrix.arch }} --publish never
         env:
-          # ปิด code signing — ไม่มี Apple Developer cert
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm exec electron-builder --mac dmg --${{ matrix.arch }} --publish never
+
+      - name: Verify ffmpeg actually embedded in packaged .app
+        shell: bash
+        working-directory: .app/shell
+        run: |
+          set -euo pipefail
+          UNPACKED=$(find release -maxdepth 3 -type d -name "mac*" | head -1)
+          [ -n "$UNPACKED" ] || { echo "FAIL: ไม่พบ mac unpacked directory"; ls -la release; exit 1; }
+          APP="$UNPACKED/INKTTS.app"
+          [ -d "$APP" ] || { echo "FAIL: $APP ไม่มีอยู่"; ls -la "$UNPACKED"; exit 1; }
+          FFMPEG="$APP/Contents/Resources/app.asar.unpacked/node_modules/ffmpeg-static/ffmpeg"
+          echo "checking: $FFMPEG"
+          [ -f "$FFMPEG" ] || { echo "FAIL: ffmpeg ไม่ถูก embed ใน app.asar.unpacked"; find "$APP" -name "ffmpeg" -type f; exit 1; }
+          SIZE="$(wc -c < "$FFMPEG")"
+          [ "$SIZE" -gt 1000000 ] || { echo "FAIL: embedded ffmpeg < 1MB ($SIZE)"; exit 1; }
+          # ตรวจ exec bit (afterPack.cjs ควรตั้งไว้แล้ว)
+          [ -x "$FFMPEG" ] || { echo "FAIL: embedded ffmpeg ไม่มี exec bit (afterPack hook ไม่ทำงาน)"; ls -la "$FFMPEG"; exit 1; }
+          ARCH_INFO="$(file "$FFMPEG")"
+          echo "file info: $ARCH_INFO"
+          case "${{ matrix.arch }}" in
+            x64)   echo "$ARCH_INFO" | grep -q "x86_64" || { echo "FAIL: expected x86_64 embedded ffmpeg"; exit 1; } ;;
+            arm64) echo "$ARCH_INFO" | grep -q "arm64"  || { echo "FAIL: expected arm64 embedded ffmpeg";  exit 1; } ;;
+          esac
+          echo "OK: embedded ffmpeg ($SIZE bytes, ${{ matrix.arch }})"
 
       - name: Attach to GitHub Release
         uses: softprops/action-gh-release@v2

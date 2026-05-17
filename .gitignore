@@ -1,7 +1,6 @@
 node_modules/
 .app/shell/dist/
 .app/shell/release/
-.app/shell/build/
 input/
 output/
 _cache/
