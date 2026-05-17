@@ -62,19 +62,19 @@ async function mergeGroups({ srcDir, dstDir, prefix, start, end, group, ext = 'm
     const outPath = path.join(dstDir, outName);
     if (missing.length) log('warn', `${i}-${j} missing: ${missing.join(', ')}`);
     const listPath = path.join(dstDir, `.list-${i}-${j}.txt`);
-    let ok = false;
+    let result = { ok: false, error: 'unknown' };
     try {
-      ok = await ffmpegConcatCopy(groupFiles, listPath, outPath);
+      result = await ffmpegConcatCopy(groupFiles, listPath, outPath);
     } catch (err) {
-      log('error', `${outName}: ${err.message}`);
+      result = { ok: false, error: err && err.message };
     } finally {
       try { fs.unlinkSync(listPath); } catch { /* noop */ }
     }
-    if (ok) {
+    if (result.ok) {
       log('ok', `${outName} (${groupFiles.length} files)`);
       totalGroups += 1;
     } else {
-      log('error', `${outName} failed`);
+      log('error', `${outName} failed — ${result.error}`);
       failed += 1;
     }
     i = j + 1;

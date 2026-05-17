@@ -5,7 +5,10 @@ import { ServicePanel } from '@/components/ServicePanel';
 import { MergePanel } from '@/components/MergePanel';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { UpdateBanner } from '@/components/UpdateBanner';
+import { ErrorToast } from '@/components/ErrorToast';
+import { ErrorInbox } from '@/components/ErrorInbox';
 import { hydrate, startAutosave } from '@/lib/persistence';
+import { reportError } from '@/lib/errorBus';
 
 export function App() {
   const view = useStore((s) => s.view);
@@ -48,8 +51,42 @@ export function App() {
       // ดาวน์โหลดล้มเหลว → ออกจาก downloading + เก็บข้อความไว้ใน banner
       // periodic poll (30 นาที) จะ retry — ถ้าสำเร็จ banner กลับมาเป็น downloading/ready ตามปกติ
       setUpdate({ downloading: false, ready: false, error: info?.message || 'ดาวน์โหลดล้มเหลว' });
+      reportError({ source: 'อัปเดต', message: info?.message || 'ดาวน์โหลด update ล้มเหลว' });
     });
-    return () => { offAvail(); offProg(); offDone(); offErr(); };
+
+    // Global handler — uncaught JS error ใน renderer
+    // ครอบ try รอบ event handlers, async tasks ที่ไม่มี await จับ ฯลฯ
+    const onWindowErr = (ev: ErrorEvent) => {
+      reportError({
+        source: 'Renderer',
+        message: ev.message || 'JavaScript error',
+        details: ev.error?.stack || `${ev.filename}:${ev.lineno}:${ev.colno}`,
+      });
+    };
+    const onRejection = (ev: PromiseRejectionEvent) => {
+      const reason: any = ev.reason;
+      reportError({
+        source: 'Renderer',
+        message: reason?.message || 'Unhandled Promise rejection',
+        details: reason?.stack || (typeof reason === 'string' ? reason : JSON.stringify(reason)),
+      });
+    };
+    window.addEventListener('error', onWindowErr);
+    window.addEventListener('unhandledrejection', onRejection);
+
+    // Global TTS error handler — runner emit 'error' ที่ไหนก็โผล่ toast
+    // (ServicePanel ก็ handle ด้วย แต่ผูกกับ service ปัจจุบัน — global = แม้ user เปลี่ยน view ระหว่างที่ job รัน ก็ยังเห็น)
+    const offTtsEvt = window.inktts.tts.onEvent((evt: any) => {
+      if (evt?.type === 'error') {
+        reportError({ source: 'TTS', message: evt.message || 'TTS job error', details: `jobId: ${evt.jobId}` });
+      }
+    });
+
+    return () => {
+      offAvail(); offProg(); offDone(); offErr(); offTtsEvt();
+      window.removeEventListener('error', onWindowErr);
+      window.removeEventListener('unhandledrejection', onRejection);
+    };
   }, []);
 
   if (!ready) {
@@ -66,6 +103,8 @@ export function App() {
          view === 'settings' ? <SettingsPanel /> :
          <ServicePanel serviceKey={view} />}
       </div>
+      <ErrorToast />
+      <ErrorInbox />
     </div>
   );
 }

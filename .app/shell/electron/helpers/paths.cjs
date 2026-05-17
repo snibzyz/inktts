@@ -82,14 +82,160 @@ function clearCache() {
 }
 
 // ffmpeg-static path — packed inside asar.unpacked or dev node_modules
+//
+// Resolution order (return FIRST path that exists as file):
+//   1. INKTTS_FFMPEG_PATH env var (escape hatch — user override เมื่อ packaged path เพี้ยน)
+//   2. require('ffmpeg-static') — ทำงานทั้ง dev + packaged
+//      packaged: replace 'app.asar' → 'app.asar.unpacked'
+//   3. Best-guess fallback paths รอบ ๆ process.resourcesPath
+//      เผื่อ require() คืน null (ffmpeg-static@5 คืน null เมื่อ arch ไม่รองรับ
+//      เช่น win32-arm64 — Electron บน arm64 runtime แต่ตอน build จัด x64)
+//
+// คืน path (string) หรือ null ถ้าหาไม่เจอ หรือเจอแต่ไม่ใช่ไฟล์
 function getFfmpegPath() {
+  const candidates = [];
+
+  // 1. user override
+  if (process.env.INKTTS_FFMPEG_PATH) candidates.push(process.env.INKTTS_FFMPEG_PATH);
+
+  // 2. require() — primary
   let p;
   try { p = require('ffmpeg-static'); } catch { p = null; }
-  if (!p) return null;
-  if (app.isPackaged) {
-    return p.replace('app.asar', 'app.asar.unpacked');
+  if (p) {
+    if (app.isPackaged) candidates.push(p.replace('app.asar', 'app.asar.unpacked'));
+    else candidates.push(p);
   }
-  return p;
+
+  // 3. fallback: scan known packaged locations relative to resourcesPath / execPath
+  if (app.isPackaged) {
+    const exeName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+    const roots = [];
+    if (process.resourcesPath) roots.push(process.resourcesPath);
+    // mac .app: execPath = .app/Contents/MacOS/INKTTS → resourcesPath = .app/Contents/Resources
+    // ถ้า resourcesPath หายไป (เคสประหลาด) ลองหารอบ ๆ execPath
+    try {
+      const ep = path.dirname(process.execPath);
+      roots.push(ep);
+      roots.push(path.join(ep, 'resources'));
+      roots.push(path.join(ep, '..', 'Resources')); // mac fallback
+    } catch { /* noop */ }
+    for (const r of roots) {
+      candidates.push(path.join(r, 'app.asar.unpacked', 'node_modules', 'ffmpeg-static', exeName));
+    }
+  }
+
+  // dedup + return first that exists as file
+  const seen = new Set();
+  for (const c of candidates) {
+    if (!c || seen.has(c)) continue;
+    seen.add(c);
+    try {
+      if (fs.statSync(c).isFile()) return c;
+    } catch { /* noop */ }
+  }
+  // last resort — คืน path แรกที่ require() ให้มา ถึงไฟล์ไม่อยู่ก็ตาม
+  // ให้ verifyFfmpeg() reportด้วย "exists=false" จะ debug ง่ายกว่าคืน null เฉย ๆ
+  if (p) return app.isPackaged ? p.replace('app.asar', 'app.asar.unpacked') : p;
+  return null;
+}
+
+// ตรวจ ffmpeg ใช้งานได้จริง — spawn -version + capture stdout/exit code
+// ผลลัพธ์ใช้ใน Settings UI + ส่งใน error report ให้ user copy
+async function verifyFfmpeg(timeoutMs = 5000) {
+  const result = {
+    ok: false,
+    path: null,
+    exists: false,
+    size: 0,
+    isFile: false,
+    execBit: null, // win32: null (NTFS ไม่มี concept นี้); posix: true/false
+    spawnOk: false,
+    versionLine: null,
+    exitCode: null,
+    error: null,
+    durationMs: 0,
+  };
+  const t0 = Date.now();
+  result.path = getFfmpegPath();
+  if (!result.path) {
+    result.error = 'getFfmpegPath() returned null — require(\'ffmpeg-static\') failed and no fallback found';
+    return result;
+  }
+  let stat;
+  try {
+    stat = fs.statSync(result.path);
+    result.exists = true;
+    result.isFile = stat.isFile();
+    result.size = stat.size;
+  } catch (err) {
+    result.error = `stat failed: ${err && err.message}`;
+    result.durationMs = Date.now() - t0;
+    return result;
+  }
+  if (!result.isFile) {
+    result.error = `not a file (mode=${stat.mode.toString(8)})`;
+    result.durationMs = Date.now() - t0;
+    return result;
+  }
+  if (result.size < 1_000_000) {
+    result.error = `binary too small (${result.size} bytes) — likely corrupted/incomplete download`;
+    result.durationMs = Date.now() - t0;
+    return result;
+  }
+  if (process.platform !== 'win32') {
+    // posix: ตรวจ exec bit ของ owner (0o100) — afterPack chmod 0o755 ให้แล้ว
+    // ถ้า strip ตอน sign / unzip → spawn จะ ENOEXEC/EACCES
+    result.execBit = (stat.mode & 0o111) !== 0;
+    if (!result.execBit) {
+      result.error = `not executable (mode=${stat.mode.toString(8)}) — afterPack chmod อาจไม่ทำงาน`;
+      result.durationMs = Date.now() - t0;
+      return result;
+    }
+  }
+  // spawn -version: ทดสอบจริงว่ารันได้ + AV ไม่บล็อก + exec format ถูก arch
+  const { spawn } = require('node:child_process');
+  try {
+    await new Promise((resolve, reject) => {
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+      const proc = spawn(result.path, ['-version'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try { proc.kill('SIGKILL'); } catch { /* noop */ }
+        reject(new Error(`spawn timeout (${timeoutMs}ms)`));
+      }, timeoutMs);
+      proc.stdout.on('data', (c) => { stdout += c.toString(); });
+      proc.stderr.on('data', (c) => { stderr += c.toString(); });
+      proc.on('error', (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      });
+      proc.on('close', (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        result.exitCode = code;
+        result.spawnOk = code === 0;
+        const firstLine = (stdout || stderr).split('\n')[0] || '';
+        result.versionLine = firstLine.trim() || null;
+        if (code !== 0) {
+          result.error = `exit ${code}: ${(stderr || '').trim().slice(-200) || 'no stderr'}`;
+        }
+        resolve();
+      });
+    });
+  } catch (err) {
+    result.error = `spawn failed: ${err && err.message}`;
+    result.durationMs = Date.now() - t0;
+    return result;
+  }
+  result.ok = result.spawnOk && !!result.versionLine;
+  result.durationMs = Date.now() - t0;
+  return result;
 }
 
 module.exports = {
@@ -101,6 +247,7 @@ module.exports = {
   getCacheSize,
   clearCache,
   getFfmpegPath,
+  verifyFfmpeg,
   ensureDir,
   getDefaultInputDir,
   getDefaultOutputDir,

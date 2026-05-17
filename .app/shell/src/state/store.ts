@@ -11,6 +11,8 @@ export interface FileRowState {
   /** ตั้งเมื่อ slot acquire จริง (รับ 'start' event จาก runner) — null ตอน standby */
   startTime: number | null;
   endTime?: number;
+  /** ข้อความ error ตอน FAIL/FFMPEG_FAIL — UI โชว์ tooltip + ใช้ใน Copy Report */
+  error?: string;
 }
 
 export interface ServiceState {
@@ -54,6 +56,21 @@ export interface MergeState {
   result: { totalGroups: number; failed: number } | null;
 }
 
+/** เก็บ error ทุกตัวที่เกิดใน session — UI ใช้สำหรับ Toast (ล่าสุด) + Inbox (รวม) */
+export interface ErrorEntry {
+  id: string;
+  /** source ของ error — ใช้เป็น tag ใน UI ("Edge TTS", "ffmpeg", "update", ...) */
+  source: string;
+  /** ข้อความหลัก โผล่ใน toast + ขึ้นต้นใน inbox */
+  message: string;
+  /** รายละเอียดเพิ่มเติม — stack, payload, etc. — เก็บแยกเพื่อให้ copy ออกมาเป็น block */
+  details?: string;
+  /** unix timestamp ตอนสร้าง */
+  ts: number;
+  /** true ถ้า user dismiss toast แล้ว (ไม่ลบ — แค่ไม่ show toast อีก) */
+  dismissed: boolean;
+}
+
 interface AppState {
   view: ViewKey;
   setView: (v: ViewKey) => void;
@@ -63,6 +80,12 @@ interface AppState {
   setRoots: (r: { appRoot: string; inputDir: string; outputDir: string }) => void;
   status: { kind: 'info' | 'ok' | 'fail' | 'warn' | 'run'; message: string };
   setStatus: (s: { kind: 'info' | 'ok' | 'fail' | 'warn' | 'run'; message: string }) => void;
+  errors: ErrorEntry[];
+  addError: (e: Omit<ErrorEntry, 'id' | 'ts' | 'dismissed'>) => void;
+  dismissError: (id: string) => void;
+  clearErrors: () => void;
+  errorInboxOpen: boolean;
+  setErrorInboxOpen: (open: boolean) => void;
   services: Record<ServiceKey, ServiceState>;
   updateService: (key: ServiceKey, patch: Partial<ServiceState>) => void;
   resetServiceRun: (key: ServiceKey) => void;
@@ -108,6 +131,26 @@ export const useStore = create<AppState>((set, get) => ({
   setRoots: (r) => set(r),
   status: { kind: 'info', message: 'พร้อมใช้งาน' },
   setStatus: (s) => set({ status: s }),
+
+  errors: [],
+  // จำกัด 100 entries — เก็บไว้สำหรับ Inbox + ส่งให้ admin
+  // ใหม่อยู่ index 0 (push เข้า front) เพื่อ render เรียงเวลาล่าสุดบนสุด
+  addError: (e) => set((s) => {
+    const entry: ErrorEntry = {
+      ...e,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      ts: Date.now(),
+      dismissed: false,
+    };
+    const next = [entry, ...s.errors].slice(0, 100);
+    return { errors: next };
+  }),
+  dismissError: (id) => set((s) => ({
+    errors: s.errors.map((x) => x.id === id ? { ...x, dismissed: true } : x),
+  })),
+  clearErrors: () => set({ errors: [] }),
+  errorInboxOpen: false,
+  setErrorInboxOpen: (open) => set({ errorInboxOpen: open }),
 
   // เริ่มที่ preset MAX เสมอ (index 0) — AdaptiveLimiter จะลดเพดานอัตโนมัติเมื่อ throttle
   services: {

@@ -42,6 +42,7 @@ export function Sidebar() {
       />
 
       <div className="flex-1" />
+      <ErrorInboxButton />
       <NavItem
         active={view === 'settings'}
         icon="gear"
@@ -50,6 +51,26 @@ export function Sidebar() {
       />
       <div className="h-2" />
     </aside>
+  );
+}
+
+function ErrorInboxButton() {
+  const errors = useStore((s) => s.errors);
+  const setOpen = useStore((s) => s.setErrorInboxOpen);
+  if (!errors.length) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => setOpen(true)}
+      className="mx-2 my-0.5 h-10 flex items-center rounded-sm text-left text-[13px] cursor-pointer transition-colors px-3 gap-2.5 text-vscode-error hover:bg-vscode-error/10"
+      title="เปิดดูรายการ error ทั้งหมดใน session"
+    >
+      <Codicon name="inbox" size={16} />
+      <span className="flex-1">รายการ Error</span>
+      <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-vscode-error text-white text-[10px] font-bold tabular-nums">
+        {errors.length > 99 ? '99+' : errors.length}
+      </span>
+    </button>
   );
 }
 

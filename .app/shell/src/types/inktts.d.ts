@@ -53,6 +53,8 @@ export interface TtsProgEvent {
   status: ProgStatus;
   done: number;
   total: number;
+  /** กรณี FAIL / FFMPEG_FAIL — ข้อความสั้น ๆ บอกเหตุที่ fail (UI โชว์ tooltip + copy report) */
+  error?: string;
 }
 export interface TtsLimitEvent {
   jobId: string;
@@ -91,6 +93,37 @@ declare global {
         onUpdateProgress: (handler: (p: { percent: number; received: number; total: number }) => void) => () => void;
         onUpdateDownloaded: (handler: (info: { mode: string; version: string }) => void) => () => void;
         onUpdateError: (handler: (info: { message: string }) => void) => () => void;
+        diagnostics: () => Promise<{
+          version: string;
+          platform: string;
+          arch: string;
+          osRelease: string;
+          electron: string;
+          node: string;
+          isPackaged: boolean;
+          portable: boolean;
+          execPath: string;
+          resourcesPath: string | null;
+          userData: string;
+          cacheRoot: string;
+          logPath: string | null;
+          ffmpeg: { path: string | null; exists: boolean; size: number; error: string | null };
+        }>;
+        verifyFfmpeg: (timeoutMs?: number) => Promise<{
+          ok: boolean;
+          path: string | null;
+          exists: boolean;
+          size: number;
+          isFile: boolean;
+          execBit: boolean | null;
+          spawnOk: boolean;
+          versionLine: string | null;
+          exitCode: number | null;
+          error: string | null;
+          durationMs: number;
+        }>;
+        logTail: (bytes?: number) => Promise<{ ok: boolean; path?: string; content?: string; truncated?: boolean; totalSize?: number; error?: string }>;
+        copyToClipboard: (text: string) => Promise<{ ok: boolean; error?: string }>;
       };
       window: {
         minimize: () => Promise<void>;

@@ -8,6 +8,7 @@ import { Codicon } from '@/ui/Codicon';
 import { AppButton } from '@/ui/AppButton';
 import { AppCard } from '@/ui/AppCard';
 import { cn } from '@/ui/cn';
+import { reportError } from '@/lib/errorBus';
 
 interface Props { serviceKey: ServiceKey }
 
@@ -47,16 +48,22 @@ export function ServicePanel({ serviceKey }: Props) {
         const base = evt.fileBase;
         const cur = useStore.getState().services[serviceKey].rowsByBase[base];
         const isFinal = ['DONE', 'FAIL', 'FFMPEG_FAIL', 'SKIP', 'EMPTY'].includes(evt.status);
+        const isErrorStatus = evt.status === 'FAIL' || evt.status === 'FFMPEG_FAIL';
+        const errorPatch = isErrorStatus
+          ? { error: evt.error || 'ไม่ทราบสาเหตุ (ไม่มีข้อความ error จาก backend)' }
+          : (evt.status === 'WORK' || evt.status === 'PENDING' ? { error: undefined } : {});
         if (cur == null) {
           upsertRow(serviceKey, {
             base, status: evt.status as ProgStatus, done: evt.done, total: evt.total,
             startTime: null,
             ...(isFinal ? { endTime: Date.now() } : {}),
+            ...errorPatch,
           });
         } else {
           patchRow(serviceKey, base, {
             status: evt.status, done: evt.done, total: evt.total,
             ...(isFinal ? { endTime: Date.now() } : {}),
+            ...errorPatch,
           });
         }
       } else if (evt.type === 'limit') {
@@ -66,11 +73,23 @@ export function ServicePanel({ serviceKey }: Props) {
         const fail = evt.stats?.filesFailed ?? 0;
         const ok = evt.stats?.filesDone ?? 0;
         const skip = evt.stats?.filesSkipped ?? 0;
-        if (fail > 0) setStatus({ kind: 'fail', message: `เสร็จพร้อมความผิดพลาด · สำเร็จ ${ok} · ล้มเหลว ${fail} · ข้าม ${skip} · ใช้เวลา ${evt.elapsedSec.toFixed(1)} วินาที` });
-        else setStatus({ kind: 'ok', message: `สำเร็จ ${ok} ไฟล์ · ข้าม ${skip} · ใช้เวลา ${evt.elapsedSec.toFixed(1)} วินาที` });
+        if (fail > 0) {
+          setStatus({ kind: 'fail', message: `เสร็จพร้อมความผิดพลาด · สำเร็จ ${ok} · ล้มเหลว ${fail} · ข้าม ${skip} · ใช้เวลา ${evt.elapsedSec.toFixed(1)} วินาที` });
+          // สร้าง details จาก rows ที่ fail (top 10) — ใส่ใน inbox ให้ user copy
+          const failedRows = useStore.getState().services[serviceKey].rows
+            .filter((r) => r.status === 'FAIL' || r.status === 'FFMPEG_FAIL');
+          const detailLines = failedRows.slice(0, 10).map((r) => `- ${r.base} [${r.status}] ${r.error || '(no message)'}`);
+          if (failedRows.length > 10) detailLines.push(`...และอีก ${failedRows.length - 10} ไฟล์`);
+          reportError({
+            source: `${serviceKey.toUpperCase()} TTS`,
+            message: `${fail} จาก ${ok + fail + skip} ไฟล์ล้มเหลว`,
+            details: detailLines.join('\n'),
+          });
+        } else setStatus({ kind: 'ok', message: `สำเร็จ ${ok} ไฟล์ · ข้าม ${skip} · ใช้เวลา ${evt.elapsedSec.toFixed(1)} วินาที` });
       } else if (evt.type === 'error') {
         updateService(serviceKey, { jobId: null });
         setStatus({ kind: 'fail', message: `ผิดพลาด: ${evt.message}` });
+        // ไม่ต้องเรียก reportError ที่นี่ — App.tsx ดักจาก global handler แล้ว (ไม่ซ้ำ)
       }
     });
     return off;
@@ -146,6 +165,7 @@ export function ServicePanel({ serviceKey }: Props) {
     if (!result.ok) {
       updateService(serviceKey, { jobId: null });
       setStatus({ kind: 'fail', message: result.error || 'เริ่มงานไม่สำเร็จ' });
+      reportError({ source: `${serviceKey.toUpperCase()} TTS`, message: 'เริ่มงานไม่สำเร็จ', details: result.error });
       return;
     }
     setStatus({ kind: 'run', message: `กำลังแปลง ${svc.name} · ${effectiveFiles.length} ไฟล์` });
@@ -184,6 +204,7 @@ export function ServicePanel({ serviceKey }: Props) {
     if (!result.ok) {
       updateService(serviceKey, { jobId: null });
       setStatus({ kind: 'fail', message: result.error || 'ลองใหม่ไม่สำเร็จ' });
+      reportError({ source: `${serviceKey.toUpperCase()} TTS`, message: 'ลองใหม่ไม่สำเร็จ', details: result.error });
       return;
     }
     setStatus({ kind: 'run', message: `กำลังลองใหม่ ${retryFiles.length} ไฟล์ที่ล้มเหลว` });
@@ -199,6 +220,82 @@ export function ServicePanel({ serviceKey }: Props) {
   const onOpenOutput = () => {
     const dir = `${outputDir.replace(/[\\/]+$/, '')}\\${svc.outputSubdir}`.replace(/\\/g, '/');
     window.inktts.fs.revealFolder(dir);
+  };
+
+  // รวบรวมข้อมูลวินิจฉัย + รายการ error → ส่งไป clipboard
+  // ใช้สำหรับ user copy แล้วส่งให้ developer วิเคราะห์ root cause
+  const [copyState, setCopyState] = useState<'idle' | 'busy' | 'ok' | 'fail'>('idle');
+  const onCopyErrorReport = async () => {
+    setCopyState('busy');
+    try {
+      const diag = await window.inktts.app.diagnostics();
+      const verify = await window.inktts.app.verifyFfmpeg(8000).catch((e: any) => ({ ok: false, error: e?.message || String(e), path: null, exists: false, size: 0, isFile: false, execBit: null, spawnOk: false, versionLine: null, exitCode: null, durationMs: 0 }));
+      const failed = state.rows.filter((r) => r.status === 'FAIL' || r.status === 'FFMPEG_FAIL');
+      const logTail = await window.inktts.app.logTail(6000);
+      const lines: string[] = [];
+      lines.push(`INKTTS Error Report — ${new Date().toISOString()}`);
+      lines.push(`Service: ${serviceKey}`);
+      lines.push('');
+      lines.push('== System ==');
+      lines.push(`version:       ${diag.version}`);
+      lines.push(`platform:      ${diag.platform} ${diag.arch} (${diag.osRelease})`);
+      lines.push(`electron/node: ${diag.electron} / ${diag.node}`);
+      lines.push(`packaged:      ${diag.isPackaged}${diag.portable ? ' (portable)' : ''}`);
+      lines.push(`execPath:      ${diag.execPath}`);
+      if (diag.resourcesPath) lines.push(`resources:     ${diag.resourcesPath}`);
+      lines.push(`userData:      ${diag.userData}`);
+      lines.push(`cacheRoot:     ${diag.cacheRoot}`);
+      lines.push(`logPath:       ${diag.logPath || '(unavailable)'}`);
+      lines.push('');
+      lines.push('== ffmpeg ==');
+      lines.push(`path:    ${diag.ffmpeg.path || '(null — require failed)'}`);
+      lines.push(`exists:  ${diag.ffmpeg.exists}`);
+      lines.push(`size:    ${diag.ffmpeg.size} bytes`);
+      if (diag.ffmpeg.error) lines.push(`stat err: ${diag.ffmpeg.error}`);
+      lines.push('');
+      lines.push('== ffmpeg runtime verify (spawn -version) ==');
+      lines.push(`ok:        ${verify.ok}`);
+      lines.push(`isFile:    ${verify.isFile}`);
+      lines.push(`execBit:   ${verify.execBit === null ? 'n/a (windows)' : verify.execBit}`);
+      lines.push(`spawnOk:   ${verify.spawnOk}`);
+      lines.push(`exitCode:  ${verify.exitCode}`);
+      lines.push(`version:   ${verify.versionLine || '(none)'}`);
+      lines.push(`duration:  ${verify.durationMs}ms`);
+      if (verify.error) lines.push(`error:     ${verify.error}`);
+      lines.push('');
+      lines.push(`== Summary (${serviceKey}) ==`);
+      lines.push(`total ${state.rows.length} · done ${stats.ok} · failed ${failed.length} · skip ${stats.skip}`);
+      lines.push(`avg ${stats.avg.toFixed(2)}s/file · elapsed ${stats.elapsed.toFixed(1)}s`);
+      lines.push(`outputDir: ${outputDir}/${svc.outputSubdir}`);
+      lines.push('');
+      lines.push(`== Failed files (${failed.length}) ==`);
+      if (!failed.length) lines.push('(ไม่มีไฟล์ที่ล้มเหลว)');
+      for (const r of failed) {
+        lines.push(`- ${r.base} [${r.status}] ${r.done}/${r.total} — ${r.error || '(ไม่มีข้อความ error)'}`);
+      }
+      lines.push('');
+      lines.push('== inktts.log (tail) ==');
+      if (logTail.ok && logTail.content) {
+        if (logTail.truncated) lines.push(`(แสดง ${logTail.content.length} bytes สุดท้าย จาก ${logTail.totalSize})`);
+        lines.push(logTail.content.trim());
+      } else {
+        lines.push(`(อ่าน log ไม่ได้: ${logTail.error || 'unknown'})`);
+      }
+      const text = lines.join('\n');
+      const r = await window.inktts.app.copyToClipboard(text);
+      if (r.ok) {
+        setCopyState('ok');
+        setStatus({ kind: 'ok', message: `คัดลอกรายงาน ${text.length} ตัวอักษรไปยัง clipboard แล้ว — paste ส่งให้ developer ได้เลย` });
+      } else {
+        setCopyState('fail');
+        setStatus({ kind: 'fail', message: `คัดลอกไม่สำเร็จ: ${r.error}` });
+      }
+    } catch (err: any) {
+      setCopyState('fail');
+      setStatus({ kind: 'fail', message: `สร้างรายงานไม่สำเร็จ: ${err?.message || err}` });
+    } finally {
+      setTimeout(() => setCopyState('idle'), 2500);
+    }
   };
 
   const inputSummary = useMemo(() => {
@@ -411,6 +508,25 @@ export function ServicePanel({ serviceKey }: Props) {
                 ? `ลดความเร็วอัตโนมัติ: ${state.limitInfo.new}/${state.limitInfo.initial}`
                 : `เพิ่มความเร็วกลับ: ${state.limitInfo.new}/${state.limitInfo.initial}`}
             </div>
+          )}
+          {stats.fail > 0 && !running && (
+            <button
+              type="button"
+              onClick={onCopyErrorReport}
+              disabled={copyState === 'busy'}
+              title="คัดลอกรายงานปัญหาทั้งหมด (system info + ffmpeg path + ทุก error + log tail) ส่งให้ developer"
+              className={cn(
+                'ml-auto inline-flex items-center gap-1.5 h-7 px-3 rounded-sm text-[12px] font-medium border transition-colors',
+                copyState === 'ok'
+                  ? 'border-vscode-success/40 bg-vscode-success/10 text-vscode-success'
+                  : copyState === 'fail'
+                  ? 'border-vscode-error/40 bg-vscode-error/10 text-vscode-error'
+                  : 'border-vscode-error/40 bg-vscode-error/10 text-vscode-error hover:bg-vscode-error/15',
+              )}
+            >
+              <Codicon name={copyState === 'ok' ? 'check' : copyState === 'busy' ? 'sync' : 'copy'} size={12} spin={copyState === 'busy'} />
+              {copyState === 'ok' ? 'คัดลอกแล้ว — paste ส่งได้เลย' : copyState === 'fail' ? 'คัดลอกไม่สำเร็จ' : `คัดลอกรายงานปัญหา (${stats.fail})`}
+            </button>
           )}
         </div>
 

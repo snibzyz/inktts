@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld('inktts', {
     onUpdateProgress: (handler) => subscribe('app:updateProgress', handler),
     onUpdateDownloaded: (handler) => subscribe('app:updateDownloaded', handler),
     onUpdateError: (handler) => subscribe('app:updateError', handler),
+    diagnostics: () => invoke('app:diagnostics'),
+    verifyFfmpeg: (timeoutMs) => invoke('app:verifyFfmpeg', { timeoutMs }),
+    logTail: (bytes) => invoke('app:logTail', { bytes }),
+    copyToClipboard: (text) => invoke('app:copyToClipboard', { text }),
   },
 
   window: {

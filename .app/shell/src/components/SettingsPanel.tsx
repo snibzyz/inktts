@@ -4,6 +4,7 @@ import { Codicon } from '@/ui/Codicon';
 import { AppButton } from '@/ui/AppButton';
 import { AppCard } from '@/ui/AppCard';
 import { cn } from '@/ui/cn';
+import { reportError } from '@/lib/errorBus';
 
 interface FolderInfo {
   defaults: { inputDir: string; outputDir: string };
@@ -36,6 +37,63 @@ export function SettingsPanel() {
     }
   };
 
+  type Verify = Awaited<ReturnType<typeof window.inktts.app.verifyFfmpeg>>;
+  const [verify, setVerify] = useState<Verify | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyCopied, setVerifyCopied] = useState(false);
+
+  const runVerify = async () => {
+    setVerifying(true);
+    try {
+      const r = await window.inktts.app.verifyFfmpeg(8000);
+      setVerify(r);
+      // auto-report เมื่อ verify fail — โผล่ใน Inbox เพื่อให้ user copy ได้ทันที
+      if (!r.ok) {
+        const detail = [
+          `path: ${r.path || '(null)'}`,
+          `exists: ${r.exists}`,
+          `size: ${r.size}`,
+          `execBit: ${r.execBit}`,
+          `spawnOk: ${r.spawnOk}`,
+          `exitCode: ${r.exitCode}`,
+          `error: ${r.error}`,
+        ].join('\n');
+        reportError({ source: 'ffmpeg', message: 'ffmpeg ใช้งานไม่ได้', details: detail });
+      }
+    } catch (e: any) {
+      setVerify({ ok: false, path: null, exists: false, size: 0, isFile: false, execBit: null, spawnOk: false, versionLine: null, exitCode: null, error: e?.message || String(e), durationMs: 0 });
+      reportError({ source: 'ffmpeg', message: 'ตรวจ ffmpeg เกิด exception', details: e });
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const copyVerify = async () => {
+    if (!verify) return;
+    const lines = [
+      `INKTTS — ffmpeg verify (${new Date().toISOString()})`,
+      `version:    ${version}`,
+      `platform:   ${window.inktts.platform}`,
+      ``,
+      `ok:         ${verify.ok}`,
+      `path:       ${verify.path || '(null)'}`,
+      `exists:     ${verify.exists}`,
+      `isFile:     ${verify.isFile}`,
+      `size:       ${verify.size} bytes`,
+      `execBit:    ${verify.execBit === null ? 'n/a (windows)' : verify.execBit}`,
+      `spawnOk:    ${verify.spawnOk}`,
+      `exitCode:   ${verify.exitCode}`,
+      `versionLine:${verify.versionLine || '(none)'}`,
+      `duration:   ${verify.durationMs}ms`,
+      verify.error ? `error:      ${verify.error}` : '',
+    ].filter(Boolean).join('\n');
+    const r = await window.inktts.app.copyToClipboard(lines);
+    if (r.ok) {
+      setVerifyCopied(true);
+      setTimeout(() => setVerifyCopied(false), 1800);
+    }
+  };
+
   const onClearCache = async () => {
     setClearing(true);
     const r = await window.inktts.cache.clear();
@@ -45,6 +103,7 @@ export function SettingsPanel() {
       refreshCache();
     } else {
       setStatus({ kind: 'fail', message: r.error || 'ล้างข้อมูลชั่วคราวไม่สำเร็จ' });
+      reportError({ source: 'Cache', message: 'ล้างข้อมูลชั่วคราวไม่สำเร็จ', details: r.error });
     }
   };
 
@@ -61,7 +120,7 @@ export function SettingsPanel() {
     setRoots(root);
   };
 
-  useEffect(() => { refreshInfo(); refreshCache(); }, []);
+  useEffect(() => { refreshInfo(); refreshCache(); runVerify(); }, []);
 
   useEffect(() => {
     if (update.available && update.version) {
@@ -220,6 +279,56 @@ export function SettingsPanel() {
           </div>
         </AppCard>
 
+        <AppCard title="ตรวจระบบ (ffmpeg)" bodyClassName="space-y-3">
+          <div className="text-[13px] text-vscode-fg leading-relaxed">
+            ffmpeg ใช้สำหรับ <span className="text-vscode-fg-bright">รวมชิ้นเสียงเป็นไฟล์เดียว</span> (.m4a)
+            ถ้าตรวจไม่ผ่าน — แต่ละไฟล์จะขึ้น "รวมเสียงพลาด"
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <AppButton tone="primary" variant="flat" onClick={runVerify} disabled={verifying}>
+              <Codicon name={verifying ? 'sync' : 'play'} size={15} spin={verifying} />
+              {verifying ? 'กำลังตรวจ...' : 'ตรวจอีกครั้ง'}
+            </AppButton>
+            {verify && (
+              <span className={cn('inline-flex items-center gap-1.5 text-[13px] font-medium px-2.5 py-1 rounded-sm',
+                verify.ok ? 'bg-vscode-success/10 text-vscode-success border border-vscode-success/40' :
+                'bg-vscode-error/10 text-vscode-error border border-vscode-error/40',
+              )}>
+                <Codicon name={verify.ok ? 'pass-filled' : 'error'} size={13} />
+                {verify.ok ? `ใช้งานได้ (${verify.durationMs}ms)` : 'ใช้งานไม่ได้'}
+              </span>
+            )}
+            {verify && (
+              <AppButton tone="zinc" variant="flat" onClick={copyVerify} title="คัดลอกผลตรวจไปยัง clipboard">
+                <Codicon name={verifyCopied ? 'check' : 'copy'} size={14} />
+                {verifyCopied ? 'คัดลอกแล้ว' : 'คัดลอกผลตรวจ'}
+              </AppButton>
+            )}
+          </div>
+          {verify && (
+            <div className="bg-vscode-editor border border-vscode-border rounded-sm p-3 font-mono text-[11px] text-vscode-fg-dim space-y-1 leading-relaxed">
+              <VerifyRow label="path" value={verify.path || '(null)'} />
+              <VerifyRow label="exists" value={String(verify.exists)} ok={verify.exists} />
+              <VerifyRow label="size" value={`${(verify.size / (1024 * 1024)).toFixed(2)} MB`} ok={verify.size > 1_000_000} />
+              {verify.execBit !== null && (
+                <VerifyRow label="exec bit" value={String(verify.execBit)} ok={verify.execBit} />
+              )}
+              <VerifyRow label="spawn -version" value={verify.spawnOk ? `exit ${verify.exitCode}` : `FAIL exit ${verify.exitCode}`} ok={verify.spawnOk} />
+              {verify.versionLine && <VerifyRow label="version" value={verify.versionLine} />}
+              {verify.error && <VerifyRow label="error" value={verify.error} ok={false} />}
+            </div>
+          )}
+          {verify && !verify.ok && (
+            <div className="text-[12px] text-vscode-warning flex items-start gap-2 bg-vscode-warning/5 border border-vscode-warning/30 rounded-sm p-2">
+              <Codicon name="warning" size={14} className="mt-0.5 flex-none" />
+              <div className="space-y-1">
+                <div>เป็นไปได้ว่า: (1) Antivirus quarantine ffmpeg.exe ใน %TEMP% (2) Windows Defender บล็อก unsigned binary (3) Disk เต็ม</div>
+                <div className="text-vscode-fg-dim">วิธีแก้: เพิ่มยกเว้น Antivirus ให้ INKTTS, หรือ set environment variable <span className="font-mono text-vscode-fg">INKTTS_FFMPEG_PATH</span> ชี้ไปที่ ffmpeg.exe ของระบบ</div>
+              </div>
+            </div>
+          )}
+        </AppCard>
+
         <AppCard title="เกี่ยวกับ" bodyClassName="space-y-2">
           <div className="text-[13px] text-vscode-fg leading-relaxed">
             INKTTS คือเครื่องมือแปลงข้อความภาษาไทยเป็นเสียงทีละหลายไฟล์ ผ่านบริการ TTS ฟรี 3 ตัว
@@ -297,6 +406,18 @@ function FolderRow({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function VerifyRow({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <span className="text-vscode-muted w-24 flex-none">{label}:</span>
+      <span className={cn('break-all flex-1',
+        ok === undefined ? 'text-vscode-fg' :
+        ok ? 'text-vscode-success' : 'text-vscode-error',
+      )}>{value}</span>
     </div>
   );
 }

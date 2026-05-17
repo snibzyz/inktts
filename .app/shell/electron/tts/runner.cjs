@@ -54,8 +54,10 @@ class TTSJob {
     this.onEvent({ jobId: this.jobId, type, ...data });
   }
 
-  prog(fileBase, status, done, total) {
-    this.emit('prog', { fileBase, status, done, total });
+  prog(fileBase, status, done, total, error) {
+    // error: เฉพาะ FAIL / FFMPEG_FAIL — string สั้นๆ บอก root cause
+    // UI ใช้สำหรับโชว์ tooltip + ปุ่ม "คัดลอกรายงานปัญหา"
+    this.emit('prog', { fileBase, status, done, total, ...(error ? { error } : {}) });
   }
 
   start(fileBase) {
@@ -170,17 +172,18 @@ class TTSJob {
     const tempo = Number(this.options.tempo ?? 1.0);
     const listPath = path.join(state.workdir, 'list.txt');
     const total = state.chunks.length;
-    let ok = false;
+    let result = { ok: false, error: 'unknown' };
     try {
-      ok = await ffmpegConcat(state.chunkPaths, listPath, state.outputPath, fmt, tempo);
+      result = await ffmpegConcat(state.chunkPaths, listPath, state.outputPath, fmt, tempo);
     } catch (err) {
-      this.log('error', `ffmpeg ${state.base}: ${err.message}`);
+      result = { ok: false, error: err && err.message };
     }
     // ลบ list.txt ที่ ffmpeg ใช้ ไม่ต้องค้างเป็นไฟล์ tmp ใน cache
     try { fs.unlinkSync(listPath); } catch { /* noop */ }
-    if (!ok) {
+    if (!result.ok) {
       this.stats.filesFailed += 1;
-      this.prog(state.base, 'FFMPEG_FAIL', total, total);
+      this.log('error', `ffmpeg ${state.base}: ${result.error}`);
+      this.prog(state.base, 'FFMPEG_FAIL', total, total, result.error);
       // ไม่ลบ chunk — เก็บไว้เผื่อ user รัน retry หรือเปิดใหม่ → resume ได้
       return;
     }
@@ -221,6 +224,9 @@ class TTSJob {
     const fileSem = new Semaphore(filePerFileSemMax);
     this._activeLimiters.add(fileSem);
     const failedChunks = [];
+    // เก็บ error message อันล่าสุดที่ chunk fetch fail — ใช้แสดงตอน status=FAIL
+    // (มีหลาย chunks fail → ใช้อันล่าสุดเป็นตัวอย่าง — มักจะเป็นปัญหาเดียวกัน เช่น network)
+    let lastFetchError = null;
 
     const maybeFinalize = async () => {
       if (state.remaining !== 0) return;
@@ -228,7 +234,8 @@ class TTSJob {
       if (failedChunks.length && failedChunks.length > total * failTol) {
         state.failed = true;
         this.stats.filesFailed += 1;
-        this.prog(state.base, 'FAIL', total - failedChunks.length, total);
+        const msg = `fetch fail ${failedChunks.length}/${total} chunks` + (lastFetchError ? ` — ${lastFetchError}` : '');
+        this.prog(state.base, 'FAIL', total - failedChunks.length, total, msg);
         // ไม่ลบ chunk ที่สำเร็จไปแล้ว — เผื่อ user รัน retry หรือเปิดใหม่ → resume ได้
         return;
       }
@@ -247,7 +254,8 @@ class TTSJob {
         try {
           await fileSem.run(() => totalLimiter.run(() => this._fetchWithRetry(state.chunks[idx], chunkPath, fetchFn, this.options.retries || 6)));
           ok = true;
-        } catch {
+        } catch (err) {
+          lastFetchError = err && err.message;
           failedChunks.push(idx);
           state.remaining -= 1;
           const done = total - state.remaining;

@@ -5,6 +5,7 @@ import { AppButton } from '@/ui/AppButton';
 import { AppCard } from '@/ui/AppCard';
 import { Input, Select } from '@/ui/Input';
 import { cn } from '@/ui/cn';
+import { reportError } from '@/lib/errorBus';
 
 export function MergePanel() {
   const merge = useStore((s) => s.merge);
@@ -20,8 +21,16 @@ export function MergePanel() {
     const offLog = window.inktts.merge.onLog((m) => appendLog(m));
     const offDone = window.inktts.merge.onDone((r) => {
       setMerge({ running: false, result: r });
-      if (r.failed) setStatus({ kind: 'fail', message: `รวมเสร็จ — สำเร็จ ${r.totalGroups} กลุ่ม, ล้มเหลว ${r.failed}` });
-      else setStatus({ kind: 'ok', message: `รวมสำเร็จ ${r.totalGroups} กลุ่ม` });
+      if (r.failed) {
+        setStatus({ kind: 'fail', message: `รวมเสร็จ — สำเร็จ ${r.totalGroups} กลุ่ม, ล้มเหลว ${r.failed}` });
+        // เอา log บรรทัด level=error มาเป็น details
+        const errLines = useStore.getState().merge.log.filter((l) => l.level === 'error');
+        reportError({
+          source: 'รวมไฟล์',
+          message: `${r.failed} กลุ่มรวมไม่สำเร็จ (สำเร็จ ${r.totalGroups})`,
+          details: errLines.slice(-10).map((l) => l.message).join('\n') || undefined,
+        });
+      } else setStatus({ kind: 'ok', message: `รวมสำเร็จ ${r.totalGroups} กลุ่ม` });
     });
     return () => { offLog(); offDone(); };
   }, []);
@@ -89,6 +98,7 @@ export function MergePanel() {
     if (!result.ok) {
       setMerge({ running: false });
       setStatus({ kind: 'fail', message: result.error || 'รวมไฟล์ล้มเหลว' });
+      reportError({ source: 'รวมไฟล์', message: 'เริ่มรวมไม่สำเร็จ', details: result.error });
     }
   };
 

@@ -15,6 +15,8 @@ const STATUS_INFO: Record<string, { icon: string; color: string; spin?: boolean;
 
 export function FileRow({ row }: { row: FileRowState }) {
   const [now, setNow] = useState(Date.now());
+  const [errorOpen, setErrorOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (['DONE', 'FAIL', 'FFMPEG_FAIL', 'SKIP', 'EMPTY', 'PENDING'].includes(row.status)) return;
     const t = setInterval(() => setNow(Date.now()), 250);
@@ -37,6 +39,17 @@ export function FileRow({ row }: { row: FileRowState }) {
 
   const name = row.base.length > 36 ? row.base.slice(0, 33) + '…' : row.base;
   const elapsedText = elapsed == null ? '—' : `${elapsed.toFixed(1)}s`;
+  const hasError = (row.status === 'FAIL' || row.status === 'FFMPEG_FAIL') && !!row.error;
+
+  const copyErrorLine = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const text = `${row.base} — ${row.status}: ${row.error || '(ไม่มีข้อความ)'}`;
+    try {
+      await window.inktts.app.copyToClipboard(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* noop */ }
+  };
 
   return (
     <div className={cn(
@@ -49,6 +62,16 @@ export function FileRow({ row }: { row: FileRowState }) {
       <div className="flex items-center gap-2">
         <Codicon name={statusInfo.icon} size={14} className={cn('flex-none', statusInfo.color)} spin={statusInfo.spin} />
         <div className="text-[12px] font-medium text-vscode-fg truncate flex-1" title={row.base}>{name}</div>
+        {hasError && (
+          <button
+            type="button"
+            onClick={() => setErrorOpen((o) => !o)}
+            title={errorOpen ? 'ซ่อนรายละเอียด' : 'ดูสาเหตุที่ล้มเหลว'}
+            className="flex-none w-5 h-5 flex items-center justify-center rounded-sm text-vscode-error hover:bg-vscode-list-hover"
+          >
+            <Codicon name={errorOpen ? 'chevron-up' : 'info'} size={12} />
+          </button>
+        )}
         <div className={cn('text-[11px] flex-none font-medium tabular-nums', statusInfo.color)}>{pctText}</div>
       </div>
       <div className="mt-1.5 flex items-center gap-2">
@@ -58,6 +81,21 @@ export function FileRow({ row }: { row: FileRowState }) {
         <div className="text-[10px] text-vscode-muted tabular-nums w-14 text-right">{row.done}/{row.total}</div>
         <div className="text-[10px] text-vscode-muted tabular-nums w-12 text-right">{elapsedText}</div>
       </div>
+      {hasError && errorOpen && (
+        <div className="mt-2 bg-vscode-editor border border-vscode-error/30 rounded-sm p-2">
+          <div className="flex items-start gap-2">
+            <div className="text-[11px] text-vscode-error font-mono break-all flex-1 whitespace-pre-wrap leading-relaxed">{row.error}</div>
+            <button
+              type="button"
+              onClick={copyErrorLine}
+              title="คัดลอกข้อความ error"
+              className="flex-none w-6 h-6 flex items-center justify-center rounded-sm text-vscode-fg-dim hover:text-vscode-fg-bright hover:bg-vscode-list-hover"
+            >
+              <Codicon name={copied ? 'check' : 'copy'} size={12} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

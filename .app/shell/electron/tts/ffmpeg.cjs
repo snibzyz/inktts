@@ -39,12 +39,20 @@ function makeOutTmp(outputPath) {
   return path.join(dir, `${stem}.partial-${token}${ext}`);
 }
 
+// คืน { ok, error } — error เป็น string สั้นๆ บอกเหตุที่ fail
+// (ก่อนหน้านี้คืน bool → user เห็นแค่ "รวมเสียงพลาด" ไม่รู้ว่าเพราะอะไร
+//  ทุกเหตุ fail กลืน log หมด ต้องเปิด inktts.log ที่ %APPDATA% ดู)
 async function ffmpegConcat(chunkPaths, listPath, outputPath, fmt, tempo = 1.0) {
   const ffmpeg = getFfmpegPath();
-  if (!ffmpeg) throw new Error('ffmpeg not bundled');
+  if (!ffmpeg) return { ok: false, error: 'ffmpeg binary ไม่พบในแอป (asar.unpacked หาย/antivirus ลบ)' };
+  if (!fs.existsSync(ffmpeg)) return { ok: false, error: `ffmpeg.exe ไม่อยู่ที่ ${ffmpeg}` };
   const { lines, validCount } = buildConcatLines(chunkPaths);
-  if (!validCount) return false;
-  fs.writeFileSync(listPath, lines + '\n', 'utf-8');
+  if (!validCount) return { ok: false, error: 'ไม่มี chunk ที่ใช้ได้ (ทั้งหมดหายหรือเล็กกว่า 1KB)' };
+  try {
+    fs.writeFileSync(listPath, lines + '\n', 'utf-8');
+  } catch (err) {
+    return { ok: false, error: `เขียน list.txt ไม่ได้: ${err && err.message}` };
+  }
 
   const outTmp = makeOutTmp(outputPath);
   const baseArgs = ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', listPath];
@@ -61,34 +69,45 @@ async function ffmpegConcat(chunkPaths, listPath, outputPath, fmt, tempo = 1.0) 
   if (code !== 0) {
     if (process.env.INKTTS_DEBUG_FFMPEG) console.error('[ffmpeg] failed', { code, stderr, args });
     try { fs.unlinkSync(outTmp); } catch { /* noop */ }
-    return false;
+    // ตัด stderr แค่ 400 ตัว — เก็บข้อมูลพอวินิจฉัย แต่ไม่บวมจน UI โชว์ไม่ไหว
+    const tail = (stderr || '').trim().slice(-400) || 'ไม่มี stderr';
+    return { ok: false, error: `ffmpeg exit ${code}: ${tail}` };
   }
   try {
     fs.renameSync(outTmp, outputPath);
   } catch (err) {
     try { fs.unlinkSync(outTmp); } catch { /* noop */ }
     if (process.env.INKTTS_DEBUG_FFMPEG) console.error('[ffmpeg] rename failed', { err: err && err.message });
-    return false;
+    return { ok: false, error: `rename output failed: ${err && err.message}` };
   }
-  return true;
+  return { ok: true };
 }
 
 async function ffmpegConcatCopy(chunkPaths, listPath, outputPath) {
   const ffmpeg = getFfmpegPath();
-  if (!ffmpeg) throw new Error('ffmpeg not bundled');
+  if (!ffmpeg) return { ok: false, error: 'ffmpeg binary ไม่พบในแอป' };
+  if (!fs.existsSync(ffmpeg)) return { ok: false, error: `ffmpeg.exe ไม่อยู่ที่ ${ffmpeg}` };
   const { lines, validCount } = buildConcatLines(chunkPaths);
-  if (!validCount) return false;
-  fs.writeFileSync(listPath, lines + '\n', 'utf-8');
+  if (!validCount) return { ok: false, error: 'ไม่มี chunk ที่ใช้ได้' };
+  try {
+    fs.writeFileSync(listPath, lines + '\n', 'utf-8');
+  } catch (err) {
+    return { ok: false, error: `เขียน list.txt ไม่ได้: ${err && err.message}` };
+  }
   const outTmp = makeOutTmp(outputPath);
   const args = ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', outTmp];
-  const { code } = await run(ffmpeg, args);
+  const { code, stderr } = await run(ffmpeg, args);
   if (code !== 0) {
     try { fs.unlinkSync(outTmp); } catch { /* noop */ }
-    return false;
+    const tail = (stderr || '').trim().slice(-400) || 'ไม่มี stderr';
+    return { ok: false, error: `ffmpeg exit ${code}: ${tail}` };
   }
   try { fs.renameSync(outTmp, outputPath); }
-  catch { try { fs.unlinkSync(outTmp); } catch { /* noop */ } return false; }
-  return true;
+  catch (err) {
+    try { fs.unlinkSync(outTmp); } catch { /* noop */ }
+    return { ok: false, error: `rename failed: ${err && err.message}` };
+  }
+  return { ok: true };
 }
 
 module.exports = { ffmpegConcat, ffmpegConcatCopy };
