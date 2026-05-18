@@ -13,6 +13,9 @@ export interface FileRowState {
   endTime?: number;
   /** ข้อความ error ตอน FAIL/FFMPEG_FAIL — UI โชว์ tooltip + ใช้ใน Copy Report */
   error?: string;
+  /** โครงสร้าง diagnostic เต็มของ FFMPEG_FAIL — ใส่ใน "คัดลอกบันทึกให้แอดมิน"
+   *  (path/argv/stderr/listPreview/exit code) — UI โชว์ collapsible block */
+  details?: Record<string, any>;
 }
 
 export interface ServiceState {
@@ -31,6 +34,9 @@ export interface ServiceState {
   advancedOpen: boolean;
   // service-specific field values (by field.name)
   fieldValues: Record<string, any>;
+  /** Per-service output folder override — null = ใช้ default (<global outputDir>/<service-subdir>)
+   *  user เลือกได้อิสระต่อ service: edge → D:/audio, google → E:/google_voices ฯลฯ */
+  outputDir: string | null;
   // run state
   jobId: string | null;
   rows: FileRowState[]; // ordered list
@@ -111,6 +117,7 @@ function initialServiceState(presetIdx: number, presetBatch: number, presetConn:
     conn: presetConn,
     advancedOpen: false,
     fieldValues: { ...fieldDefaults },
+    outputDir: null,
     jobId: null,
     rows: [],
     rowsByBase: {},

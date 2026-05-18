@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('inktts', {
     verifyFfmpeg: (timeoutMs) => invoke('app:verifyFfmpeg', { timeoutMs }),
     logTail: (bytes) => invoke('app:logTail', { bytes }),
     copyToClipboard: (text) => invoke('app:copyToClipboard', { text }),
+    openLogFile: () => invoke('app:openLogFile'),
+    revealLogFile: () => invoke('app:revealLogFile'),
   },
 
   window: {

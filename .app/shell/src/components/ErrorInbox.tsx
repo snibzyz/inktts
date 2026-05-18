@@ -128,21 +128,31 @@ export function ErrorInbox() {
           )}
         </div>
 
-        <footer className="px-5 py-3 border-t border-vscode-border flex items-center gap-2 flex-none">
+        <footer className="px-5 py-3 border-t border-vscode-border flex items-center gap-2 flex-none flex-wrap">
           <AppButton
             tone="primary"
             variant="flat"
             disabled={!errors.length || copyAllState === 'busy'}
             onClick={copyAll}
+            title="คัดลอกทุก error ใน session + ข้อมูลระบบ + log tail — ส่งให้แอดมินวิเคราะห์"
           >
             <Codicon
               name={copyAllState === 'ok' ? 'check' : copyAllState === 'busy' ? 'sync' : 'copy'}
               size={14}
               spin={copyAllState === 'busy'}
             />
-            {copyAllState === 'ok' ? 'คัดลอกแล้ว — paste ส่งได้เลย'
+            {copyAllState === 'ok' ? 'คัดลอกแล้ว — paste ส่งให้แอดมินได้เลย'
               : copyAllState === 'fail' ? 'คัดลอกไม่สำเร็จ'
-              : 'คัดลอกทั้งหมด + ข้อมูลระบบ'}
+              : 'คัดลอกบันทึกให้แอดมิน (ทั้งหมด + ข้อมูลระบบ)'}
+          </AppButton>
+          <AppButton
+            tone="zinc"
+            variant="flat"
+            onClick={() => window.inktts.app.revealLogFile()}
+            title="เปิด File Explorer แสดง inktts.log — zip แล้วส่งให้แอดมินได้"
+          >
+            <Codicon name="folder-opened" size={14} />
+            เปิดโฟลเดอร์ log
           </AppButton>
           <div className="flex-1" />
           {errors.length > 0 && (

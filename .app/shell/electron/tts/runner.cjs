@@ -10,6 +10,9 @@ const edge = require('./edge.cjs');
 const google = require('./google.cjs');
 const rv = require('./responsivevoice.cjs');
 const { getServiceCacheDir } = require('../helpers/paths.cjs');
+const { createLogger } = require('../helpers/logger.cjs');
+
+const runnerLog = createLogger('runner');
 
 const ENGINES = { edge, google, rv };
 
@@ -48,16 +51,24 @@ class TTSJob {
     // wakers สำหรับ cancellable sleep — cancel() จะ reject ทุก sleep ที่ค้าง
     // → กด Stop ตอน backoff (สูงสุด 32 วิ) ก็หยุดทันที ไม่ต้องรอจบรอบ
     this._sleepWakers = new Set();
+    // watchdog intervals — cross-check ว่า output file โผล่ขึ้นมาแล้วหรือยัง
+    // (เคส: chunks ค้าง แต่ ffmpeg ของ run ก่อนเคย concat เสร็จ → file มี → ไม่ต้องค้าง)
+    this._activeWatchdogs = new Set();
   }
 
   emit(type, data) {
     this.onEvent({ jobId: this.jobId, type, ...data });
   }
 
-  prog(fileBase, status, done, total, error) {
+  prog(fileBase, status, done, total, error, details) {
     // error: เฉพาะ FAIL / FFMPEG_FAIL — string สั้นๆ บอก root cause
+    // details: optional structured object (e.g., ffmpeg argv + stderr + path) สำหรับ Error Inbox
     // UI ใช้สำหรับโชว์ tooltip + ปุ่ม "คัดลอกรายงานปัญหา"
-    this.emit('prog', { fileBase, status, done, total, ...(error ? { error } : {}) });
+    this.emit('prog', {
+      fileBase, status, done, total,
+      ...(error ? { error } : {}),
+      ...(details ? { details } : {}),
+    });
   }
 
   start(fileBase) {
@@ -81,6 +92,11 @@ class TTSJob {
       try { wake(); } catch { /* noop */ }
     }
     this._sleepWakers.clear();
+    // หยุด watchdog ที่ poll output file
+    for (const w of this._activeWatchdogs) {
+      try { clearInterval(w); } catch { /* noop */ }
+    }
+    this._activeWatchdogs.clear();
   }
 
   // sleep ที่ cancel ปลุกได้ — register waker ไว้ใน job แล้ว cancel() เรียก wake() เพื่อ reject
@@ -158,11 +174,30 @@ class TTSJob {
       }
     } catch { /* noop */ }
     const chunkPaths = chunks.map((_, i) => path.join(workdir, `${String(i).padStart(6, '0')}.mp3`));
+    // นับ cache hit/miss ตั้งแต่ prepare เพื่อ log scenario "chunks อยู่แล้ว แค่รวม"
+    // (= existsSync + size > 1KB → fetchOne จะข้าม ไม่เรียก fetchFn)
+    let cachedCount = 0;
+    for (const cp of chunkPaths) {
+      try {
+        if (fs.statSync(cp).size > 1024) cachedCount += 1;
+      } catch { /* noop */ }
+    }
     // PENDING = รอคิว (มี total แล้ว แต่ยังไม่ได้ slot) — UI ใช้แยกจาก WORK
     this.prog(base, 'PENDING', 0, chunks.length);
+    runnerLog.info('prepare', {
+      base, totalChunks: chunks.length, cachedChunks: cachedCount,
+      willFetch: chunks.length - cachedCount,
+      cacheHitRatio: chunks.length ? +(cachedCount / chunks.length).toFixed(3) : 0,
+      workdir,
+    });
     return {
       inputPath, base, outputPath, workdir,
       chunks, chunkPaths, remaining: chunks.length, failed: false,
+      // finalized = true หลัง _finalizeFile (หรือ FAIL terminate) ถูกเรียก —
+      // กัน chunk ที่ resolve มาทีหลัง (เช่น WS reply ช้า) ส่ง prog WORK ทับ DONE/FAIL
+      // (เคย user เห็น: ไฟล์ output มีแล้ว 5-7MB แต่ UI ยังหมุน 35/41)
+      finalized: false,
+      cachedAtStart: cachedCount, fetchedThisRun: 0,
     };
   }
 
@@ -172,6 +207,16 @@ class TTSJob {
     const tempo = Number(this.options.tempo ?? 1.0);
     const listPath = path.join(state.workdir, 'list.txt');
     const total = state.chunks.length;
+    // log per-file summary ก่อนเรียก ffmpeg — ให้เห็นชัดในไฟล์ log ว่า
+    // มาถึง concat ด้วย cache ratio เท่าไหร่ (scenario "ไม่ fetch ใหม่เลย" จะชัด)
+    runnerLog.info('finalize: pre-concat', {
+      base: state.base, fmt, tempo,
+      totalChunks: total,
+      cachedAtStart: state.cachedAtStart || 0,
+      fetchedThisRun: state.fetchedThisRun || 0,
+      remainingChunks: state.chunkPaths.length,
+      outputPath: state.outputPath,
+    });
     let result = { ok: false, error: 'unknown' };
     try {
       result = await ffmpegConcat(state.chunkPaths, listPath, state.outputPath, fmt, tempo);
@@ -183,7 +228,9 @@ class TTSJob {
     if (!result.ok) {
       this.stats.filesFailed += 1;
       this.log('error', `ffmpeg ${state.base}: ${result.error}`);
-      this.prog(state.base, 'FFMPEG_FAIL', total, total, result.error);
+      // ส่ง details เพิ่มไป UI (Error Inbox) เพื่อให้ user copy report ได้พร้อม
+      // path/argv/listPreview/stderr — UI โชว์เป็น collapsible block
+      this.prog(state.base, 'FFMPEG_FAIL', total, total, result.error, result.details);
       // ไม่ลบ chunk — เก็บไว้เผื่อ user รัน retry หรือเปิดใหม่ → resume ได้
       return;
     }
@@ -195,10 +242,20 @@ class TTSJob {
 
   async _fetchWithRetry(text, outPath, fetchFn, retries) {
     let lastErr;
+    // per-attempt wall-clock timeout — กัน fetchFn hang ตลอด (WebSocket connect-hang,
+    // HTTP socket ค้าง, server ไม่ส่ง response) → ทำให้ chunk ไม่ resolve/reject เลย
+    // → state.remaining ไม่ลด → maybeFinalize ไม่ trigger → UI ค้างที่ WORK ถึง 7+ นาที
+    // (user เคยเจอ: 35/41 ค้าง 457s ทั้งที่ไฟล์ output มีแล้ว)
+    // timeout = race กับ fetchFn — ถ้าเกิน → throw → catch → retry/fail ตามปกติ
+    const attemptTimeoutMs = Number(this.options.fetchAttemptTimeoutMs) || 60000;
     for (let i = 0; i < retries; i += 1) {
       if (this.cancelled) throw new Error('cancelled');
       try {
-        await fetchFn(text, outPath);
+        await this._withTimeout(
+          fetchFn(text, outPath),
+          attemptTimeoutMs,
+          `fetch timeout ${attemptTimeoutMs}ms`,
+        );
         if (fs.existsSync(outPath) && fs.statSync(outPath).size > 1024) return;
         throw new Error('empty audio');
       } catch (err) {
@@ -215,6 +272,24 @@ class TTSJob {
     throw lastErr;
   }
 
+  // race promise vs timeout — ถ้า timeout ก่อน, reject พร้อม message
+  // ไม่ abort fetchFn ใต้ระดับ (WS อาจค้างต่อใน background) — แต่ controlflow ของ
+  // runner หลุดออกมาได้ → state.remaining เดินต่อ → finalize → DONE/FAIL
+  _withTimeout(p, ms, label) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(label));
+      }, ms);
+      Promise.resolve(p).then(
+        (v) => { if (settled) return; settled = true; clearTimeout(timer); resolve(v); },
+        (e) => { if (settled) return; settled = true; clearTimeout(timer); reject(e); },
+      );
+    });
+  }
+
   async _synthOneFile(state, fetchFn, filePerFileSemMax, totalLimiter) {
     // Mark this file as "actually starting now" — UI will reset timer here
     this.start(state.base);
@@ -228,8 +303,54 @@ class TTSJob {
     // (มีหลาย chunks fail → ใช้อันล่าสุดเป็นตัวอย่าง — มักจะเป็นปัญหาเดียวกัน เช่น network)
     let lastFetchError = null;
 
+    // Watchdog: poll output file ทุก 5 วินาที — ถ้า file โผล่และ valid → force DONE
+    // ครอบ scenario:
+    //   1. ffmpeg concat ของ run ก่อนเคยเสร็จ → file มี → chunks ค้าง = ไม่ต้องค้าง
+    //   2. emit DONE หลุดทาง IPC race → file มี แต่ UI ไม่รู้ → safety net catch ได้
+    //   3. instance อื่นทำเสร็จก่อน (user รัน 2 windows) → instance ปัจจุบัน fast-forward DONE
+    const watchdogIntervalMs = Number(this.options.outputWatchdogMs) || 5000;
+    const watchdog = setInterval(() => {
+      if (state.finalized || this.cancelled) {
+        clearInterval(watchdog);
+        this._activeWatchdogs.delete(watchdog);
+        return;
+      }
+      try {
+        const st = fs.statSync(state.outputPath);
+        if (st.size > 1024) {
+          state.finalized = true;
+          clearInterval(watchdog);
+          this._activeWatchdogs.delete(watchdog);
+          this.stats.filesDone += 1;
+          runnerLog.info('watchdog: output file detected — force DONE', {
+            base: state.base, size: st.size, path: state.outputPath,
+          });
+          this.prog(state.base, 'DONE', total, total);
+        }
+      } catch { /* not yet — keep polling */ }
+    }, watchdogIntervalMs);
+    this._activeWatchdogs.add(watchdog);
+
     const maybeFinalize = async () => {
       if (state.remaining !== 0) return;
+      // กัน double-finalize: 2 chunk fail พร้อมกัน → 2 path มาถึง remaining=0 ทั้งคู่
+      // (ไม่น่าเกิดเพราะ JS single-threaded แต่กันไว้)
+      if (state.finalized) return;
+      // Pre-check: ถ้า output มีอยู่แล้ว (ffmpeg ของ run ก่อนทำสำเร็จไว้)
+      // → ข้าม concat ทันที — ประหยัด CPU + กัน race ที่ rename ทับไฟล์เดียวกัน
+      try {
+        const st = fs.statSync(state.outputPath);
+        if (st.size > 1024) {
+          state.finalized = true;
+          this.stats.filesDone += 1;
+          runnerLog.info('maybeFinalize: output already exists — skip concat', {
+            base: state.base, size: st.size, path: state.outputPath,
+          });
+          this.prog(state.base, 'DONE', total, total);
+          return;
+        }
+      } catch { /* output ยังไม่มี — ดำเนินการ concat ตามปกติ */ }
+      state.finalized = true;
       const failTol = Number(this.options.failTolerance ?? 0.15);
       if (failedChunks.length && failedChunks.length > total * failTol) {
         state.failed = true;
@@ -247,6 +368,10 @@ class TTSJob {
     };
 
     const fetchOne = async (idx) => {
+      // bail out ถ้า finalize ไปแล้ว — ไม่ emit prog (จะทับ DONE/FAIL)
+      // เคส: 5/6 fetch fail → maybeFinalize → concat → DONE → chunk ตัวที่ 6 resolve มาทีหลัง
+      // → ถ้าไม่ check ตรงนี้ จะ emit WORK ทับ DONE → UI ติดที่ WORK ตลอด
+      if (state.finalized || this.cancelled) return;
       const chunkPath = state.chunkPaths[idx];
       const exists = fs.existsSync(chunkPath) && fs.statSync(chunkPath).size > 1024;
       if (!exists) {
@@ -254,8 +379,10 @@ class TTSJob {
         try {
           await fileSem.run(() => totalLimiter.run(() => this._fetchWithRetry(state.chunks[idx], chunkPath, fetchFn, this.options.retries || 6)));
           ok = true;
+          state.fetchedThisRun = (state.fetchedThisRun || 0) + 1;
         } catch (err) {
           lastFetchError = err && err.message;
+          if (state.finalized) return; // กัน emit หลัง finalize
           failedChunks.push(idx);
           state.remaining -= 1;
           const done = total - state.remaining;
@@ -266,6 +393,7 @@ class TTSJob {
         }
         totalLimiter.reportOutcome(ok);
       }
+      if (state.finalized) return; // กัน emit หลัง finalize (เคส cache hit ตามมาทีหลัง)
       this.stats.chunksDone += 1;
       state.remaining -= 1;
       const done = total - state.remaining;
@@ -277,6 +405,8 @@ class TTSJob {
       await Promise.all(state.chunks.map((_, i) => fetchOne(i)));
     } finally {
       this._activeLimiters.delete(fileSem);
+      clearInterval(watchdog);
+      this._activeWatchdogs.delete(watchdog);
     }
   }
 

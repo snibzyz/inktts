@@ -8,7 +8,7 @@ import { useStore } from '@/state/store';
 import type { ServiceKey } from '@/types/inktts';
 
 const PERSIST_KEYS: Array<keyof ReturnType<typeof useStore.getState>['services'][ServiceKey]> = [
-  'presetIdx', 'batch', 'conn', 'fieldValues', 'limitN', 'limitAll', 'advancedOpen',
+  'presetIdx', 'batch', 'conn', 'fieldValues', 'limitN', 'limitAll', 'advancedOpen', 'outputDir',
 ];
 
 function pickServicePersist(s: any) {
@@ -38,6 +38,7 @@ export async function hydrate() {
         ...(saved.limitN != null ? { limitN: saved.limitN } : {}),
         ...(saved.limitAll != null ? { limitAll: saved.limitAll } : {}),
         ...(saved.advancedOpen != null ? { advancedOpen: saved.advancedOpen } : {}),
+        ...(saved.outputDir !== undefined ? { outputDir: saved.outputDir } : {}),
       });
     }
   }

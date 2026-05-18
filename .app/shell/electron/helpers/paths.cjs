@@ -92,51 +92,120 @@ function clearCache() {
 //      เช่น win32-arm64 — Electron บน arm64 runtime แต่ตอน build จัด x64)
 //
 // คืน path (string) หรือ null ถ้าหาไม่เจอ หรือเจอแต่ไม่ใช่ไฟล์
-function getFfmpegPath() {
+//
+// Logging: ครั้งแรกที่ resolve เสร็จ จะ log decision tree เต็มไปที่ inktts.log
+// (candidates ที่ลอง, อันไหน hit, size/isFile). ครั้งต่อ ๆ ไป silent — กัน spam.
+// ส่ง diagnostic = { path, exists, size, isFile, candidates: [{path, exists, isFile, size, error}] }
+// ให้ caller ส่งต่อใน error report ได้
+let _ffmpegPathCache = null; // memoize last resolved path
+let _ffmpegPathLogged = false;
+
+function _resolveFfmpegPath() {
+  const diagnostic = { resolvedPath: null, candidates: [], requireResult: null, requireError: null };
   const candidates = [];
 
   // 1. user override
-  if (process.env.INKTTS_FFMPEG_PATH) candidates.push(process.env.INKTTS_FFMPEG_PATH);
+  if (process.env.INKTTS_FFMPEG_PATH) {
+    candidates.push({ source: 'INKTTS_FFMPEG_PATH', path: process.env.INKTTS_FFMPEG_PATH });
+  }
 
   // 2. require() — primary
   let p;
-  try { p = require('ffmpeg-static'); } catch { p = null; }
+  try { p = require('ffmpeg-static'); diagnostic.requireResult = p; }
+  catch (err) { p = null; diagnostic.requireError = err && err.message; }
   if (p) {
-    if (app.isPackaged) candidates.push(p.replace('app.asar', 'app.asar.unpacked'));
-    else candidates.push(p);
+    const finalP = app.isPackaged ? p.replace('app.asar', 'app.asar.unpacked') : p;
+    candidates.push({ source: app.isPackaged ? 'require+asar-unpacked' : 'require(dev)', path: finalP });
   }
 
   // 3. fallback: scan known packaged locations relative to resourcesPath / execPath
   if (app.isPackaged) {
     const exeName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
     const roots = [];
-    if (process.resourcesPath) roots.push(process.resourcesPath);
+    if (process.resourcesPath) roots.push({ source: 'resourcesPath', root: process.resourcesPath });
     // mac .app: execPath = .app/Contents/MacOS/INKTTS → resourcesPath = .app/Contents/Resources
-    // ถ้า resourcesPath หายไป (เคสประหลาด) ลองหารอบ ๆ execPath
     try {
       const ep = path.dirname(process.execPath);
-      roots.push(ep);
-      roots.push(path.join(ep, 'resources'));
-      roots.push(path.join(ep, '..', 'Resources')); // mac fallback
+      roots.push({ source: 'execPath dirname', root: ep });
+      roots.push({ source: 'execPath/resources', root: path.join(ep, 'resources') });
+      roots.push({ source: 'execPath/../Resources (mac)', root: path.join(ep, '..', 'Resources') });
     } catch { /* noop */ }
-    for (const r of roots) {
-      candidates.push(path.join(r, 'app.asar.unpacked', 'node_modules', 'ffmpeg-static', exeName));
+    for (const { source, root } of roots) {
+      candidates.push({
+        source: `fallback ${source}`,
+        path: path.join(root, 'app.asar.unpacked', 'node_modules', 'ffmpeg-static', exeName),
+      });
     }
   }
 
-  // dedup + return first that exists as file
+  // dedup + record stat result for each candidate
   const seen = new Set();
+  let firstHit = null;
   for (const c of candidates) {
-    if (!c || seen.has(c)) continue;
-    seen.add(c);
+    if (!c.path || seen.has(c.path)) continue;
+    seen.add(c.path);
+    const entry = { source: c.source, path: c.path, exists: false, isFile: false, size: 0, error: null };
     try {
-      if (fs.statSync(c).isFile()) return c;
-    } catch { /* noop */ }
+      const st = fs.statSync(c.path);
+      entry.exists = true;
+      entry.isFile = st.isFile();
+      entry.size = st.size;
+      if (st.isFile() && !firstHit) firstHit = c.path;
+    } catch (err) {
+      entry.error = err && err.code ? err.code : (err && err.message);
+    }
+    diagnostic.candidates.push(entry);
+  }
+
+  if (firstHit) {
+    diagnostic.resolvedPath = firstHit;
+    return { path: firstHit, diagnostic };
   }
   // last resort — คืน path แรกที่ require() ให้มา ถึงไฟล์ไม่อยู่ก็ตาม
   // ให้ verifyFfmpeg() reportด้วย "exists=false" จะ debug ง่ายกว่าคืน null เฉย ๆ
-  if (p) return app.isPackaged ? p.replace('app.asar', 'app.asar.unpacked') : p;
-  return null;
+  if (p) {
+    const fallback = app.isPackaged ? p.replace('app.asar', 'app.asar.unpacked') : p;
+    diagnostic.resolvedPath = fallback;
+    diagnostic.noHitFallback = true;
+    return { path: fallback, diagnostic };
+  }
+  return { path: null, diagnostic };
+}
+
+function getFfmpegPath() {
+  if (_ffmpegPathCache !== null && _ffmpegPathLogged) return _ffmpegPathCache.path;
+  const result = _resolveFfmpegPath();
+  _ffmpegPathCache = result;
+  if (!_ffmpegPathLogged) {
+    _ffmpegPathLogged = true;
+    // lazy require — กัน circular ตอน module load (logger.cjs ไม่ require paths.cjs ตรง ๆ
+    // แต่กันไว้ก่อนเผื่อในอนาคต)
+    try {
+      const { createLogger } = require('./logger.cjs');
+      const log = createLogger('ffmpeg-path');
+      log.info('resolved', {
+        platform: process.platform,
+        arch: process.arch,
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath || null,
+        execPath: process.execPath || null,
+        envOverride: process.env.INKTTS_FFMPEG_PATH || null,
+        requireResult: result.diagnostic.requireResult,
+        requireError: result.diagnostic.requireError,
+        resolvedPath: result.path,
+        noHitFallback: result.diagnostic.noHitFallback || false,
+        candidates: result.diagnostic.candidates,
+      });
+    } catch { /* noop */ }
+  }
+  return result.path;
+}
+
+// คืน diagnostic ดิบของ resolution ล่าสุด — ใช้ใน error report เมื่อ ffmpeg fail
+// caller สามารถเอาไปแนบใน FFMPEG_FAIL prog event ได้
+function getFfmpegPathDiagnostic() {
+  if (_ffmpegPathCache === null) getFfmpegPath(); // force resolve
+  return _ffmpegPathCache ? _ffmpegPathCache.diagnostic : null;
 }
 
 // ตรวจ ffmpeg ใช้งานได้จริง — spawn -version + capture stdout/exit code
@@ -247,6 +316,7 @@ module.exports = {
   getCacheSize,
   clearCache,
   getFfmpegPath,
+  getFfmpegPathDiagnostic,
   verifyFfmpeg,
   ensureDir,
   getDefaultInputDir,

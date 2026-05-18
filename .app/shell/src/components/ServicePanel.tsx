@@ -49,9 +49,13 @@ export function ServicePanel({ serviceKey }: Props) {
         const cur = useStore.getState().services[serviceKey].rowsByBase[base];
         const isFinal = ['DONE', 'FAIL', 'FFMPEG_FAIL', 'SKIP', 'EMPTY'].includes(evt.status);
         const isErrorStatus = evt.status === 'FAIL' || evt.status === 'FFMPEG_FAIL';
+        // details = structured diagnostic (ffmpeg argv/stderr/path) — UI โชว์ใน FileRow expand
         const errorPatch = isErrorStatus
-          ? { error: evt.error || 'ไม่ทราบสาเหตุ (ไม่มีข้อความ error จาก backend)' }
-          : (evt.status === 'WORK' || evt.status === 'PENDING' ? { error: undefined } : {});
+          ? {
+              error: evt.error || 'ไม่ทราบสาเหตุ (ไม่มีข้อความ error จาก backend)',
+              details: evt.details,
+            }
+          : (evt.status === 'WORK' || evt.status === 'PENDING' ? { error: undefined, details: undefined } : {});
         if (cur == null) {
           upsertRow(serviceKey, {
             base, status: evt.status as ProgStatus, done: evt.done, total: evt.total,
@@ -156,10 +160,17 @@ export function ServicePanel({ serviceKey }: Props) {
     const localJobId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     updateService(serviceKey, { jobId: localJobId, startTime: Date.now(), lastRunFiles: effectiveFiles });
     const opts = buildOptionsFromFields(svc, state.fieldValues);
+    // ส่ง outputDir override (ถ้า user เลือกเอง) → runner ใช้แทน default
+    // (runner: const outputDir = options?.outputDir || path.join(getOutputDir(), <service-subdir>))
     const result = await window.inktts.tts.start({
       service: serviceKey,
       files: effectiveFiles,
-      options: { ...opts, batchSize: state.batch, connectionsPerFile: state.conn },
+      options: {
+        ...opts,
+        batchSize: state.batch,
+        connectionsPerFile: state.conn,
+        ...(state.outputDir ? { outputDir: state.outputDir } : {}),
+      },
       jobId: localJobId,
     });
     if (!result.ok) {
@@ -184,7 +195,7 @@ export function ServicePanel({ serviceKey }: Props) {
       return failedBases.has(base);
     });
     if (!retryFiles.length) {
-      setStatus({ kind: 'warn', message: 'หาที่อยู่ไฟล์เดิมไม่เจอ — กรุณากด "เริ่มแปลงเสียง" ใหม่' });
+      setStatus({ kind: 'warn', message: 'ไม่พบที่อยู่ไฟล์เดิม — กรุณากด "เริ่มแปลงเสียง" อีกครั้ง' });
       return;
     }
     // reset the failed rows to PENDING; keep DONE/SKIP rows intact
@@ -198,7 +209,12 @@ export function ServicePanel({ serviceKey }: Props) {
     const result = await window.inktts.tts.start({
       service: serviceKey,
       files: retryFiles,
-      options: { ...opts, batchSize: state.batch, connectionsPerFile: state.conn },
+      options: {
+        ...opts,
+        batchSize: state.batch,
+        connectionsPerFile: state.conn,
+        ...(state.outputDir ? { outputDir: state.outputDir } : {}),
+      },
       jobId: localJobId,
     });
     if (!result.ok) {
@@ -214,12 +230,30 @@ export function ServicePanel({ serviceKey }: Props) {
     if (!state.jobId) return;
     await window.inktts.tts.cancel(state.jobId);
     updateService(serviceKey, { cancelled: true });
-    setStatus({ kind: 'warn', message: 'กำลังขอหยุด... (รอตอนที่กำลังทำอยู่ให้เสร็จก่อน)' });
+    setStatus({ kind: 'warn', message: 'กำลังหยุดงาน — รอชิ้นที่กำลังทำให้จบก่อน' });
   };
 
+  // effective output dir = per-service override (ถ้ามี) → default global outputDir + service subdir
+  // เก็บแบบ string ตรง ๆ ไม่ทำ trailing-slash hygiene เพราะ Electron revealFolder handle ได้
+  const effectiveOutputDir = state.outputDir
+    || `${outputDir.replace(/[\\/]+$/, '')}/${svc.outputSubdir}`.replace(/\\/g, '/');
+
   const onOpenOutput = () => {
-    const dir = `${outputDir.replace(/[\\/]+$/, '')}\\${svc.outputSubdir}`.replace(/\\/g, '/');
-    window.inktts.fs.revealFolder(dir);
+    window.inktts.fs.revealFolder(effectiveOutputDir);
+  };
+
+  const pickOutputDir = async () => {
+    const dir = await window.inktts.fs.chooseFolder({
+      defaultPath: effectiveOutputDir,
+      title: `เลือกโฟลเดอร์ผลลัพธ์สำหรับ ${svc.name}`,
+    });
+    if (!dir) return;
+    updateService(serviceKey, { outputDir: dir });
+    setStatus({ kind: 'ok', message: `เปลี่ยนโฟลเดอร์ผลลัพธ์ ${svc.name} เป็น ${dir}` });
+  };
+  const resetOutputDir = () => {
+    updateService(serviceKey, { outputDir: null });
+    setStatus({ kind: 'info', message: `รีเซ็ตโฟลเดอร์ผลลัพธ์ ${svc.name} เป็นค่าเริ่มต้น` });
   };
 
   // รวบรวมข้อมูลวินิจฉัย + รายการ error → ส่งไป clipboard
@@ -266,12 +300,25 @@ export function ServicePanel({ serviceKey }: Props) {
       lines.push(`== Summary (${serviceKey}) ==`);
       lines.push(`total ${state.rows.length} · done ${stats.ok} · failed ${failed.length} · skip ${stats.skip}`);
       lines.push(`avg ${stats.avg.toFixed(2)}s/file · elapsed ${stats.elapsed.toFixed(1)}s`);
-      lines.push(`outputDir: ${outputDir}/${svc.outputSubdir}`);
+      lines.push(`outputDir: ${effectiveOutputDir}${isCustomOutput ? ' (custom)' : ' (default)'}`);
       lines.push('');
       lines.push(`== Failed files (${failed.length}) ==`);
       if (!failed.length) lines.push('(ไม่มีไฟล์ที่ล้มเหลว)');
       for (const r of failed) {
         lines.push(`- ${r.base} [${r.status}] ${r.done}/${r.total} — ${r.error || '(ไม่มีข้อความ error)'}`);
+        // ถ้ามี structured details (ffmpeg path/argv/stderr) — แนบเป็น block ต่อ
+        // จำกัด stderr 600 ตัว/ไฟล์ กัน report ยาวเกินไป (มี logTail ครอบอีกชั้นอยู่แล้ว)
+        if (r.details) {
+          const d = r.details;
+          if (d.reason) lines.push(`    reason:   ${d.reason}`);
+          if (d.ffmpegPath != null) lines.push(`    ffmpeg:   ${d.ffmpegPath} (${d.ffmpegSize ?? '?'} bytes)`);
+          if (d.exitCode != null || d.spawnError) lines.push(`    exit:     ${d.exitCode ?? '?'}${d.spawnError ? ` spawnErr=${d.spawnError}` : ''} in ${d.durationMs ?? '?'}ms`);
+          if (Array.isArray(d.argv)) lines.push(`    argv:     ${d.argv.join(' ')}`);
+          if (Array.isArray(d.listPreview)) lines.push(`    list:     ${d.listPreview.join(' | ')}`);
+          if (typeof d.stderr === 'string' && d.stderr) {
+            lines.push(`    stderr:   ${d.stderr.slice(-600)}`);
+          }
+        }
       }
       lines.push('');
       lines.push('== inktts.log (tail) ==');
@@ -285,7 +332,7 @@ export function ServicePanel({ serviceKey }: Props) {
       const r = await window.inktts.app.copyToClipboard(text);
       if (r.ok) {
         setCopyState('ok');
-        setStatus({ kind: 'ok', message: `คัดลอกรายงาน ${text.length} ตัวอักษรไปยัง clipboard แล้ว — paste ส่งให้ developer ได้เลย` });
+        setStatus({ kind: 'ok', message: `คัดลอกรายงาน ${text.length} ตัวอักษรเรียบร้อย — วางเพื่อส่งให้แอดมิน` });
       } else {
         setCopyState('fail');
         setStatus({ kind: 'fail', message: `คัดลอกไม่สำเร็จ: ${r.error}` });
@@ -327,7 +374,8 @@ export function ServicePanel({ serviceKey }: Props) {
     return { ok, fail, work, skip, finished, total: state.rows.length, avg, eta, elapsed };
   }, [state.rows, state.startTime, state.endTime]);
 
-  const outputPath = `${outputDir}/${svc.outputSubdir}`.replace(/\\/g, '/');
+  const defaultOutputPath = `${outputDir.replace(/[\\/]+$/, '')}/${svc.outputSubdir}`.replace(/\\/g, '/');
+  const isCustomOutput = !!state.outputDir;
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -459,9 +507,27 @@ export function ServicePanel({ serviceKey }: Props) {
             </div>
           )}
 
-          <div className="text-[12px] text-vscode-fg-dim flex items-center gap-2 pt-1">
-            <Codicon name="output" size={14} />
-            <span>ไฟล์เสียงจะอยู่ที่: {outputPath}</span>
+          {/* โฟลเดอร์ผลลัพธ์ — กำหนดแยกต่อบริการได้ */}
+          <div className="pt-2 flex items-center gap-2">
+            <Codicon name="output" size={14} className="text-vscode-fg-dim flex-none" />
+            <div
+              className="flex-1 min-w-0 h-10 px-3 flex items-center bg-vscode-input border border-vscode-input-border rounded-sm text-[12px] text-vscode-fg font-mono truncate"
+              title={effectiveOutputDir}
+            >
+              {effectiveOutputDir}
+            </div>
+            <AppButton tone="zinc" variant="chrome" onClick={pickOutputDir} disabled={running}>
+              <Codicon name="folder" size={14} />
+              เลือก
+            </AppButton>
+            {isCustomOutput && (
+              <AppButton tone="zinc" variant="icon" onClick={resetOutputDir} disabled={running} title={`รีเซ็ตเป็นค่าเริ่มต้น (${defaultOutputPath})`}>
+                <Codicon name="discard" size={15} />
+              </AppButton>
+            )}
+            <AppButton tone="zinc" variant="icon" onClick={onOpenOutput} title="เปิดในตัวจัดการไฟล์">
+              <Codicon name="link-external" size={15} />
+            </AppButton>
           </div>
 
           <div className="flex items-center gap-2 pt-3 flex-wrap">
@@ -525,7 +591,7 @@ export function ServicePanel({ serviceKey }: Props) {
               )}
             >
               <Codicon name={copyState === 'ok' ? 'check' : copyState === 'busy' ? 'sync' : 'copy'} size={12} spin={copyState === 'busy'} />
-              {copyState === 'ok' ? 'คัดลอกแล้ว — paste ส่งได้เลย' : copyState === 'fail' ? 'คัดลอกไม่สำเร็จ' : `คัดลอกรายงานปัญหา (${stats.fail})`}
+              {copyState === 'ok' ? 'คัดลอกแล้ว — วางส่งให้แอดมินได้' : copyState === 'fail' ? 'คัดลอกไม่สำเร็จ' : `คัดลอกรายงานปัญหา (${stats.fail})`}
             </button>
           )}
         </div>

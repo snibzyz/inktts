@@ -279,7 +279,7 @@ export function SettingsPanel() {
           </div>
         </AppCard>
 
-        <AppCard title="ตรวจระบบ (ffmpeg)" bodyClassName="space-y-3">
+        <AppCard title="ตรวจระบบ (ffmpeg) + ไฟล์ log" bodyClassName="space-y-3">
           <div className="text-[13px] text-vscode-fg leading-relaxed">
             ffmpeg ใช้สำหรับ <span className="text-vscode-fg-bright">รวมชิ้นเสียงเป็นไฟล์เดียว</span> (.m4a)
             ถ้าตรวจไม่ผ่าน — แต่ละไฟล์จะขึ้น "รวมเสียงพลาด"
@@ -304,6 +304,30 @@ export function SettingsPanel() {
                 {verifyCopied ? 'คัดลอกแล้ว' : 'คัดลอกผลตรวจ'}
               </AppButton>
             )}
+            <AppButton
+              tone="zinc"
+              variant="flat"
+              onClick={async () => {
+                const r = await window.inktts.app.openLogFile();
+                if (!r.ok) reportError({ source: 'Log', message: r.error || 'เปิดไฟล์ log ไม่ได้', details: r });
+              }}
+              title="เปิดไฟล์ inktts.log ใน text editor"
+            >
+              <Codicon name="output" size={14} />
+              เปิดไฟล์ log
+            </AppButton>
+            <AppButton
+              tone="zinc"
+              variant="flat"
+              onClick={async () => {
+                const r = await window.inktts.app.revealLogFile();
+                if (!r.ok) reportError({ source: 'Log', message: r.error || 'เปิดโฟลเดอร์ log ไม่ได้', details: r });
+              }}
+              title="เปิด File Explorer แสดง inktts.log — ส่งให้แอดมินได้"
+            >
+              <Codicon name="folder-opened" size={14} />
+              เปิดโฟลเดอร์ log
+            </AppButton>
           </div>
           {verify && (
             <div className="bg-vscode-editor border border-vscode-border rounded-sm p-3 font-mono text-[11px] text-vscode-fg-dim space-y-1 leading-relaxed">

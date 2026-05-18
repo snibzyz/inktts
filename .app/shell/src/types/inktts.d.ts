@@ -55,6 +55,23 @@ export interface TtsProgEvent {
   total: number;
   /** กรณี FAIL / FFMPEG_FAIL — ข้อความสั้น ๆ บอกเหตุที่ fail (UI โชว์ tooltip + copy report) */
   error?: string;
+  /** กรณี FFMPEG_FAIL — โครงสร้าง diagnostic เต็ม (path/argv/stderr/listPreview)
+   *  ใช้แนบใน Error Inbox "คัดลอกบันทึกให้แอดมิน" ให้แอดมิน reproduce ได้ */
+  details?: {
+    reason: string;
+    ffmpegPath?: string | null;
+    ffmpegSize?: number;
+    exitCode?: number | null;
+    spawnError?: string | null;
+    durationMs?: number;
+    argv?: string[];
+    listPreview?: string[];
+    validChunks?: number;
+    stderr?: string;
+    diagnostic?: any;
+    rejectedSample?: Array<{ path: string; reason: string }>;
+    [k: string]: any;
+  };
 }
 export interface TtsLimitEvent {
   jobId: string;
@@ -124,6 +141,8 @@ declare global {
         }>;
         logTail: (bytes?: number) => Promise<{ ok: boolean; path?: string; content?: string; truncated?: boolean; totalSize?: number; error?: string }>;
         copyToClipboard: (text: string) => Promise<{ ok: boolean; error?: string }>;
+        openLogFile: () => Promise<{ ok: boolean; path?: string; error?: string }>;
+        revealLogFile: () => Promise<{ ok: boolean; path?: string; error?: string }>;
       };
       window: {
         minimize: () => Promise<void>;
@@ -182,6 +201,8 @@ export interface PersistedServiceState {
   limitN?: number;
   limitAll?: boolean;
   advancedOpen?: boolean;
+  /** Per-service output folder override — null/undefined = ใช้ default */
+  outputDir?: string | null;
 }
 
 export interface PersistedSettings {

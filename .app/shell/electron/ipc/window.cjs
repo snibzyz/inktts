@@ -1,4 +1,4 @@
-const { ipcMain, app, clipboard } = require('electron');
+const { ipcMain, app, clipboard, shell } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -100,6 +100,33 @@ function registerWindowIpc(getMainWindow) {
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err && err.message };
+    }
+  });
+
+  // เปิดไฟล์ log ใน default editor (Notepad/TextEdit/xdg-open)
+  // ใช้กับปุ่ม "เปิดไฟล์ log" ใน Settings — user ส่งให้แอดมินได้สะดวกกว่า copy paste
+  ipcMain.handle('app:openLogFile', async () => {
+    const p = getLogPath();
+    if (!p) return { ok: false, error: 'log path unavailable' };
+    if (!fs.existsSync(p)) return { ok: false, error: `log file ไม่อยู่ที่ ${p}`, path: p };
+    try {
+      const result = await shell.openPath(p);
+      if (result) return { ok: false, error: result, path: p };
+      return { ok: true, path: p };
+    } catch (err) {
+      return { ok: false, error: err && err.message, path: p };
+    }
+  });
+
+  // เปิด File Explorer แสดง log file (highlight ตัวไฟล์) — user copy/zip/send ได้
+  ipcMain.handle('app:revealLogFile', () => {
+    const p = getLogPath();
+    if (!p) return { ok: false, error: 'log path unavailable' };
+    try {
+      shell.showItemInFolder(p);
+      return { ok: true, path: p };
+    } catch (err) {
+      return { ok: false, error: err && err.message, path: p };
     }
   });
 }
