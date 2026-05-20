@@ -1,7 +1,7 @@
 const { ipcMain } = require('electron');
 const path = require('node:path');
 const { TTSJob } = require('../tts/runner.cjs');
-const { mergeGroups, detectPrefixRange } = require('../tts/merge.cjs');
+const { mergeGroups, detectAudioFiles } = require('../tts/merge.cjs');
 const { getOutputDir } = require('../helpers/paths.cjs');
 const { createLogger } = require('../helpers/logger.cjs');
 
@@ -50,9 +50,9 @@ function registerTtsIpc(getMainWindow) {
   });
 
   ipcMain.handle('merge:start', async (_e, payload) => {
-    const { srcDir, dstDir, prefix, start, end, group, ext } = payload || {};
-    if (!srcDir || !prefix || start == null || end == null) {
-      return { ok: false, error: 'missing src/prefix/start/end' };
+    const { srcDir, dstDir, prefix, outPrefix, start, end, group, ext } = payload || {};
+    if (!srcDir || start == null || end == null) {
+      return { ok: false, error: 'missing src/start/end' };
     }
     const w = getMainWindow();
     const sendLog = (level, message) => {
@@ -63,6 +63,7 @@ function registerTtsIpc(getMainWindow) {
         srcDir,
         dstDir: dstDir || `${srcDir}_merged`,
         prefix,
+        outPrefix,
         start: Number(start),
         end: Number(end),
         group: Number(group) || 10,
@@ -82,7 +83,7 @@ function registerTtsIpc(getMainWindow) {
     const srcDir = payload?.srcDir;
     const ext = payload?.ext || 'm4a';
     if (!srcDir) return null;
-    return detectPrefixRange(srcDir, ext);
+    return detectAudioFiles(srcDir, ext);
   });
 }
 

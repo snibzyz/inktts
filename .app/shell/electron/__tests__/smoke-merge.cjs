@@ -9,7 +9,7 @@ require.cache[require.resolve('electron')] = {
   },
 };
 
-const { mergeGroups, detectPrefixRange } = require('../tts/merge.cjs');
+const { mergeGroups, detectAudioFiles } = require('../tts/merge.cjs');
 
 async function main() {
   const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
@@ -20,7 +20,7 @@ async function main() {
   if (fs.existsSync(dstDir)) fs.rmSync(dstDir, { recursive: true, force: true });
 
   // Detect
-  const det = detectPrefixRange(srcDir, 'm4a');
+  const det = detectAudioFiles(srcDir, 'm4a');
   if (!det) { console.error('no .m4a in', srcDir); process.exit(2); }
   console.log('[detect]', det);
 
@@ -29,7 +29,7 @@ async function main() {
   console.log(`[smoke] merging ${start}-${end} (group=2)`);
 
   const result = await mergeGroups({
-    srcDir, dstDir, prefix: det.prefix, start, end, group: 2, ext: 'm4a',
+    srcDir, dstDir, outPrefix: det.prefix, start, end, group: 2, ext: 'm4a',
     onLog: (lvl, msg) => console.log(`[${lvl}]`, msg),
   });
 

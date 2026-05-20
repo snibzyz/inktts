@@ -167,7 +167,7 @@ declare global {
         onEvent: (handler: (evt: TtsEvent) => void) => () => void;
       };
       merge: {
-        start: (payload: { srcDir: string; dstDir?: string; prefix: string; start: number; end: number; group: number; ext?: string }) => Promise<{ ok: boolean; totalGroups?: number; failed?: number; error?: string }>;
+        start: (payload: { srcDir: string; dstDir?: string; prefix?: string; outPrefix?: string; start: number; end: number; group: number; ext?: string }) => Promise<{ ok: boolean; totalGroups?: number; failed?: number; error?: string }>;
         detect: (srcDir: string, ext?: string) => Promise<{ prefix: string; start: number; end: number; count: number } | null>;
         onLog: (handler: (msg: { level: string; message: string }) => void) => () => void;
         onDone: (handler: (result: { totalGroups: number; failed: number }) => void) => () => void;

@@ -55,7 +55,8 @@ export function MergePanel() {
     setMerge({ ext });
     if (merge.srcDir) {
       const det = await window.inktts.merge.detect(merge.srcDir, ext);
-      setMerge({ detected: det });
+      if (det) setMerge({ detected: det, prefix: det.prefix, start: det.start, end: det.end });
+      else setMerge({ detected: null });
     }
   };
 
@@ -79,8 +80,8 @@ export function MergePanel() {
   }, [merge.prefix, merge.start, merge.end, merge.group, merge.ext]);
 
   const onStart = async () => {
-    if (!merge.srcDir || !merge.prefix) {
-      setStatus({ kind: 'warn', message: 'เลือกโฟลเดอร์ต้นทาง + กรอกคำนำหน้าชื่อไฟล์ก่อน' });
+    if (!merge.srcDir) {
+      setStatus({ kind: 'warn', message: 'เลือกโฟลเดอร์ต้นทางก่อน' });
       return;
     }
     resetLog();
@@ -89,7 +90,9 @@ export function MergePanel() {
     const result = await window.inktts.merge.start({
       srcDir: merge.srcDir,
       dstDir: `${merge.srcDir}_merged`,
-      prefix: merge.prefix,
+      // merge ไม่ดูชื่อไฟล์ต้นทาง — แค่นับไฟล์ + เรียงตามชื่อ (natural sort) แล้วแบ่งกลุ่ม
+      // outPrefix = ช่องที่ผู้ใช้พิมพ์ ใช้ตั้งชื่อไฟล์ผลลัพธ์อย่างเดียว · start = เลขเริ่มของชื่อ
+      outPrefix: merge.prefix,
       start: merge.start,
       end: merge.end,
       group: merge.group,
@@ -135,16 +138,16 @@ export function MergePanel() {
             <div className={cn('text-[12px] flex items-center gap-2 ml-[220px]', merge.detected ? 'text-vscode-success' : 'text-vscode-warning')}>
               <Codicon name={merge.detected ? 'pass-filled' : 'warning'} size={14} />
               {merge.detected
-                ? `พบ '${merge.detected.prefix}' ตอน ${merge.detected.start}-${merge.detected.end} (${merge.detected.count} ไฟล์)`
+                ? `พบ ${merge.detected.count} ไฟล์ .${merge.ext} — เรียงตามชื่อไฟล์แล้วแบ่งกลุ่ม`
                 : `ไม่พบไฟล์ .${merge.ext} ในโฟลเดอร์`}
             </div>
           )}
 
-          <FieldRow label="คำนำหน้าชื่อไฟล์">
+          <FieldRow label="คำนำหน้าไฟล์ผลลัพธ์">
             <Input
               type="text"
               className="w-full max-w-md"
-              placeholder="เช่น  ติดหนี้สามสิบล้าน  (เว้นวรรคก่อนเลขตอน)"
+              placeholder="ตั้งชื่อนำหน้าไฟล์ที่รวมแล้ว เช่น  ตอน   (เว้นวรรคก่อนเลข)"
               value={merge.prefix}
               onChange={(e) => setMerge({ prefix: e.target.value })}
             />
