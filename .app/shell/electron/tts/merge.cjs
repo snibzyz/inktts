@@ -24,6 +24,9 @@ function listAudioFiles(srcDir, ext) {
   }
   return names
     .filter((f) => f.toLowerCase().endsWith(suffix))
+    // ข้าม macOS AppleDouble metadata files (._*) ที่ Finder สร้างบน exFAT/FAT32
+    // ไฟล์พวกนี้ไม่มี audio data จริง ffmpeg จะฟ้อง "moov atom not found"
+    .filter((f) => !f.startsWith('._'))
     .sort((a, b) => collator.compare(a, b));
 }
 
