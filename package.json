@@ -1,6 +1,6 @@
 {
   "name": "inktts-workspace",
-  "version": "2.0.8",
+  "version": "2.0.9",
   "private": true,
   "description": "INKTTS — Thai batch text-to-speech desktop app",
   "scripts": {
