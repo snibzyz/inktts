@@ -26,11 +26,14 @@ export function ServicePanel({ serviceKey }: Props) {
   const patchRow = useStore((s) => s.patchRow);
   const upsertRow = useStore((s) => s.upsertRow);
   const resetRun = useStore((s) => s.resetServiceRun);
+  const resetAll = useStore((s) => s.resetServiceAll);
   const setStatus = useStore((s) => s.setStatus);
   const inputDir = useStore((s) => s.inputDir);
   const outputDir = useStore((s) => s.outputDir);
 
   const [globFiles, setGlobFiles] = useState<string[]>([]);
+  const [confirmReset, setConfirmReset] = useState<null | { deleteAudio: boolean }>(null);
+  const [resetBusy, setResetBusy] = useState(false);
 
   useEffect(() => {
     // อ่าน jobId ผ่าน getState ทุกครั้งที่ event เข้า — ไม่ใช่จาก closure
@@ -132,13 +135,33 @@ export function ServicePanel({ serviceKey }: Props) {
     updateService(serviceKey, { presetIdx: idx, batch: p.batch, conn: p.conn });
   };
 
+  // เมื่อ user เปลี่ยน input files หลังจาก run เสร็จ → ล้าง rows ของ run เดิม + ลบ chunks
+  // กัน cache aliasing (ไฟล์ใหม่ชื่อเดียวกับเก่า → chunks เก่าค้างใน _cache → เสียงเพี้ยน)
+  // ไม่ทำงานถ้ายัง running อยู่ — user ห้ามแตะ state ระหว่างรัน
+  const maybeClearStaleRun = async (clearChunks: boolean) => {
+    if (state.jobId) return; // running — ห้ามล้าง
+    const hadPriorRun = state.rows.length > 0 || state.lastRunFiles.length > 0;
+    if (!hadPriorRun) return;
+    if (clearChunks) {
+      // ลบ chunks เฉพาะ bases ของ run เดิม — เร็วกว่าและไม่กระทบไฟล์อื่นใน service
+      const bases = state.lastRunFiles.map((f) => f.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, ''));
+      try { await window.inktts.cache.clearFiles(serviceKey, bases); } catch { /* noop */ }
+    }
+  };
+
   const browseFolder = async () => {
     const dir = await window.inktts.fs.chooseFolder({ defaultPath: inputDir, title: 'เลือกโฟลเดอร์' });
-    if (dir) updateService(serviceKey, { pattern: dir, selectedFiles: [] });
+    if (!dir) return;
+    await maybeClearStaleRun(true);
+    resetAll(serviceKey);
+    updateService(serviceKey, { pattern: dir, selectedFiles: [] });
   };
   const browseFiles = async () => {
     const files = await window.inktts.fs.chooseFiles({ defaultPath: inputDir, title: 'เลือกไฟล์' });
-    if (files.length) updateService(serviceKey, { selectedFiles: files, pattern: '' });
+    if (!files.length) return;
+    await maybeClearStaleRun(true);
+    resetAll(serviceKey);
+    updateService(serviceKey, { selectedFiles: files, pattern: '' });
   };
 
   const running = !!state.jobId;
@@ -231,6 +254,50 @@ export function ServicePanel({ serviceKey }: Props) {
     await window.inktts.tts.cancel(state.jobId);
     updateService(serviceKey, { cancelled: true });
     setStatus({ kind: 'warn', message: 'กำลังหยุดงาน — รอชิ้นที่กำลังทำให้จบก่อน' });
+  };
+
+  // เก็บ basenames + path output ที่ "จะถูกล้าง" ตอน "เริ่มใหม่"
+  // — bases จาก lastRunFiles (run ล่าสุด) หรือ rows ที่มีอยู่
+  // — outputDir = effectiveOutputDir ของ service นี้
+  const computeResetTargets = () => {
+    const fromRun = state.lastRunFiles.map((f) => f.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, ''));
+    const fromRows = state.rows.map((r) => r.base);
+    const bases = Array.from(new Set([...fromRun, ...fromRows]));
+    return bases;
+  };
+
+  // ดำเนินการ "เริ่มใหม่" จริง — เคลียร์ทุกอย่างตาม opts
+  const doReset = async (opts: { deleteAudio: boolean }) => {
+    if (state.jobId) {
+      setStatus({ kind: 'warn', message: 'หยุดงานก่อนเริ่มใหม่' });
+      return;
+    }
+    setResetBusy(true);
+    try {
+      const bases = computeResetTargets();
+      // 1. ลบ chunks ของ service นี้ทั้งหมด — ครอบคลุม bases เก่า + งานที่ค้าง
+      const cacheResult = await window.inktts.cache.clearService(serviceKey).catch(() => ({ ok: false, bytesFreed: 0 }));
+      // 2. (option) ลบไฟล์เสียง .m4a เก่า ใน output dir ของ service
+      let deleted = 0;
+      let outBytes = 0;
+      if (opts.deleteAudio && bases.length) {
+        const outRes = await window.inktts.output.clearFiles(serviceKey, bases, {
+          outputDir: state.outputDir || undefined,
+          ext: 'm4a',
+        }).catch(() => ({ ok: false, deleted: 0, bytesFreed: 0 }));
+        deleted = outRes.deleted || 0;
+        outBytes = outRes.bytesFreed || 0;
+      }
+      // 3. ล้าง UI state — rows, selectedFiles, pattern, lastRunFiles
+      resetAll(serviceKey);
+      setConfirmReset(null);
+      const parts: string[] = ['เริ่มใหม่เรียบร้อย'];
+      if (cacheResult.ok && cacheResult.bytesFreed > 0) parts.push(`ลบ chunks ${formatBytes(cacheResult.bytesFreed)}`);
+      if (opts.deleteAudio) parts.push(`ลบไฟล์เสียง ${deleted} ไฟล์${outBytes ? ` (${formatBytes(outBytes)})` : ''}`);
+      setStatus({ kind: 'ok', message: parts.join(' · ') });
+    } finally {
+      setResetBusy(false);
+    }
   };
 
   // effective output dir = per-service override (ถ้ามี) → default global outputDir + service subdir
@@ -548,11 +615,65 @@ export function ServicePanel({ serviceKey }: Props) {
               <Codicon name="refresh" size={15} />
               ลองใหม่เฉพาะที่ล้มเหลว {stats.fail > 0 ? `(${stats.fail})` : ''}
             </AppButton>
+            <AppButton
+              tone="zinc"
+              variant="flat"
+              disabled={running || resetBusy || (state.rows.length === 0 && state.selectedFiles.length === 0 && !state.pattern)}
+              onClick={() => setConfirmReset({ deleteAudio: false })}
+              title="ล้าง rows + ลบ chunks cache ของบริการนี้ (เลือกลบไฟล์เสียงเก่าด้วยได้)"
+            >
+              <Codicon name="clear-all" size={15} />
+              เริ่มใหม่
+            </AppButton>
             <AppButton tone="zinc" variant="flat" onClick={onOpenOutput}>
               <Codicon name="folder-opened" size={15} />
               เปิดโฟลเดอร์ผลลัพธ์
             </AppButton>
           </div>
+
+          {/* "เริ่มใหม่" confirmation — แสดง inline หลังกดปุ่ม
+              ลิสต์ชัด ๆ ว่าจะลบอะไรบ้าง + checkbox สำหรับ destructive option */}
+          {confirmReset && (
+            <div className="mt-3 border border-vscode-warning/40 bg-vscode-warning/5 rounded-sm p-3 space-y-2">
+              <div className="flex items-center gap-2 text-[13px] font-semibold text-vscode-warning">
+                <Codicon name="warning" size={14} />
+                ยืนยันเริ่มใหม่
+              </div>
+              <ul className="text-[12px] text-vscode-fg-dim list-disc pl-5 space-y-0.5">
+                <li>ล้างรายการไฟล์ที่เลือก + ตารางความคืบหน้า</li>
+                <li>ลบ chunks cache ทั้งหมดของบริการ <span className="text-vscode-fg">{svc.name}</span></li>
+                {confirmReset.deleteAudio && (
+                  <li className="text-vscode-error">
+                    ลบไฟล์เสียง .m4a ของไฟล์ที่รันไปแล้ว ({computeResetTargets().length} ไฟล์) ใน {effectiveOutputDir}
+                  </li>
+                )}
+              </ul>
+              <label className="flex items-center gap-2 text-[12px] text-vscode-fg cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={confirmReset.deleteAudio}
+                  onChange={(e) => setConfirmReset({ deleteAudio: e.target.checked })}
+                  className="accent-vscode-error w-4 h-4"
+                />
+                <span>ลบไฟล์เสียง .m4a เก่าด้วย <span className="text-vscode-muted">(แก้ปัญหา "เสียงเรื่องเก่ายังอยู่")</span></span>
+              </label>
+              <div className="flex items-center gap-2 pt-1">
+                <AppButton
+                  tone="primary"
+                  variant="flat"
+                  onClick={() => doReset(confirmReset)}
+                  disabled={resetBusy}
+                >
+                  <Codicon name={resetBusy ? 'sync' : 'check'} size={14} spin={resetBusy} />
+                  ยืนยันเริ่มใหม่
+                </AppButton>
+                <AppButton tone="zinc" variant="flat" onClick={() => setConfirmReset(null)} disabled={resetBusy}>
+                  <Codicon name="close" size={14} />
+                  ยกเลิก
+                </AppButton>
+              </div>
+            </div>
+          )}
         </AppCard>
 
         {/* Summary */}
@@ -620,4 +741,13 @@ function FieldRow({ label, children, className }: { label: string; children: Rea
       <div>{children}</div>
     </div>
   );
+}
+
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+  return `${v < 10 ? v.toFixed(2) : v < 100 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
 }

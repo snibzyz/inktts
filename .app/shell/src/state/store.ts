@@ -95,6 +95,10 @@ interface AppState {
   services: Record<ServiceKey, ServiceState>;
   updateService: (key: ServiceKey, patch: Partial<ServiceState>) => void;
   resetServiceRun: (key: ServiceKey) => void;
+  /** ล้างทุก state ที่เกี่ยวกับ "การรัน" (rows, lastRunFiles, จับเวลา) + ไฟล์ที่เลือก/pattern
+   *  ใช้เมื่อ user กดปุ่ม "เริ่มใหม่" หรือ เปลี่ยน selectedFiles หลังรันเสร็จ
+   *  ไม่แตะ presetIdx / batch / conn / fieldValues / outputDir — settings ของ user คงไว้ */
+  resetServiceAll: (key: ServiceKey) => void;
   patchServiceField: (key: ServiceKey, field: string, value: any) => void;
   upsertRow: (key: ServiceKey, row: FileRowState) => void;
   patchRow: (key: ServiceKey, base: string, patch: Partial<FileRowState>) => void;
@@ -174,6 +178,26 @@ export const useStore = create<AppState>((set, get) => ({
       services: {
         ...s.services,
         [key]: { ...s.services[key], jobId: null, rows: [], rowsByBase: {}, lastRunFiles: [], startTime: null, endTime: null, cancelled: false, limitInfo: null },
+      },
+    })),
+
+  resetServiceAll: (key) =>
+    set((s) => ({
+      services: {
+        ...s.services,
+        [key]: {
+          ...s.services[key],
+          selectedFiles: [],
+          pattern: '',
+          jobId: null,
+          rows: [],
+          rowsByBase: {},
+          lastRunFiles: [],
+          startTime: null,
+          endTime: null,
+          cancelled: false,
+          limitInfo: null,
+        },
       },
     })),
 

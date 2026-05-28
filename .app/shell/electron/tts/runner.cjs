@@ -129,6 +129,9 @@ class TTSJob {
 
     if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 1024) {
       this.stats.filesSkipped += 1;
+      // output มีแล้ว = SKIP → chunks ที่ค้างเป็น stale leftover ไม่มีประโยชน์ลบทิ้ง
+      // กัน cache aliasing ตอน user รันใหม่ด้วยชื่อไฟล์เดิมแต่เนื้อหาใหม่
+      try { fs.rmSync(workdir, { recursive: true, force: true }); } catch { /* noop */ }
       this.prog(base, 'SKIP', 1, 1);
       return null;
     }
@@ -234,10 +237,21 @@ class TTSJob {
       // ไม่ลบ chunk — เก็บไว้เผื่อ user รัน retry หรือเปิดใหม่ → resume ได้
       return;
     }
-    // ไม่ลบ chunks หลัง concat สำเร็จ → resume ได้เมื่อรันซ้ำ
-    // user เคลียร์เองผ่านปุ่ม Clear Cache ในหน้า Settings
+    // ลบ chunks หลัง concat สำเร็จ → กัน cache aliasing เวลา user รันใหม่
+    // ด้วยชื่อไฟล์เดิมแต่เนื้อหาใหม่ (เคย user เจอ "เสียงเรื่องเก่ายังอยู่")
+    // ไม่กระทบ resume เพราะไฟล์ที่ DONE แล้วไม่ต้อง resume — output มีเต็มแล้ว
+    this._cleanupWorkdir(state);
     this.stats.filesDone += 1;
     this.prog(state.base, 'DONE', total, total);
+  }
+
+  // ลบ chunk workdir ของไฟล์ที่จบแล้ว — เรียกเฉพาะ path ที่ output สำเร็จ
+  // (DONE จาก _finalizeFile / DONE จาก maybeFinalize precheck / DONE จาก watchdog)
+  // path ที่ FAIL / cancel ไม่เรียก → keep chunks ไว้ resume ตอนรันใหม่
+  _cleanupWorkdir(state) {
+    if (!state || !state.workdir) return;
+    try { fs.rmSync(state.workdir, { recursive: true, force: true }); }
+    catch (err) { runnerLog.warn('cleanup workdir failed', { base: state.base, error: err && err.message }); }
   }
 
   async _fetchWithRetry(text, outPath, fetchFn, retries) {
@@ -322,6 +336,7 @@ class TTSJob {
           clearInterval(watchdog);
           this._activeWatchdogs.delete(watchdog);
           this.stats.filesDone += 1;
+          this._cleanupWorkdir(state);
           runnerLog.info('watchdog: output file detected — force DONE', {
             base: state.base, size: st.size, path: state.outputPath,
           });
@@ -343,6 +358,7 @@ class TTSJob {
         if (st.size > 1024) {
           state.finalized = true;
           this.stats.filesDone += 1;
+          this._cleanupWorkdir(state);
           runnerLog.info('maybeFinalize: output already exists — skip concat', {
             base: state.base, size: st.size, path: state.outputPath,
           });

@@ -252,6 +252,8 @@ export function SettingsPanel() {
           <div className="text-[13px] text-vscode-fg leading-relaxed">
             แอพเก็บชิ้นเสียงที่ดาวน์โหลดมาไว้ใช้รอบถัดไป — ถ้าไฟดับ ปิดเครื่อง หรือเปิดใหม่กลางทาง
             กดเริ่มใหม่จะ <span className="text-vscode-fg-bright">ทำต่อจากเดิม</span> ไม่เริ่มจาก 0
+            <br />
+            ตั้งแต่ v2.0.9 chunks ของไฟล์ที่ DONE จะถูกลบทันที — cache ที่เหลือคือไฟล์ค้างจากงานที่ยังไม่เสร็จเท่านั้น
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2 text-[14px]">
@@ -265,7 +267,7 @@ export function SettingsPanel() {
             </AppButton>
             <AppButton tone="zinc" variant="flat" onClick={onClearCache} disabled={clearing || (cacheBytes ?? 0) === 0}>
               <Codicon name={clearing ? 'sync' : 'trash'} size={14} spin={clearing} />
-              {clearing ? 'กำลังล้าง...' : 'ล้างข้อมูลชั่วคราว'}
+              {clearing ? 'กำลังล้าง...' : 'ล้างข้อมูลทั้งหมด'}
             </AppButton>
             {cachePath && (
               <AppButton tone="zinc" variant="icon" onClick={() => window.inktts.fs.revealFolder(cachePath)} title="เปิดในตัวจัดการไฟล์">
@@ -273,6 +275,18 @@ export function SettingsPanel() {
               </AppButton>
             )}
           </div>
+
+          {/* per-service: ลบ cache ของบริการเดียว — ใช้เมื่ออยากเก็บ cache บริการอื่นไว้
+              เช่น run Edge เสร็จ จะเริ่ม run Google ใหม่ → ล้าง google เท่านั้น */}
+          <div className="border-t border-vscode-border pt-2 space-y-1.5">
+            <div className="text-[12px] text-vscode-fg-dim">ล้างเฉพาะบริการ:</div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {(['edge', 'google', 'rv'] as const).map((svc) => (
+                <ServiceClearButton key={svc} service={svc} onCleared={() => { refreshCache(); }} />
+              ))}
+            </div>
+          </div>
+
           <div className="text-[12px] text-vscode-fg-dim flex items-start gap-2">
             <Codicon name="info" size={14} className="mt-0.5" />
             <span>กดล้างเมื่อยืนยันว่างานทุกไฟล์รวมเสร็จแล้ว — ล้างกลางทางจะต้องดาวน์โหลดใหม่</span>
@@ -443,6 +457,29 @@ function VerifyRow({ label, value, ok }: { label: string; value: string; ok?: bo
         ok ? 'text-vscode-success' : 'text-vscode-error',
       )}>{value}</span>
     </div>
+  );
+}
+
+function ServiceClearButton({ service, onCleared }: { service: 'edge' | 'google' | 'rv'; onCleared: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [lastBytes, setLastBytes] = useState<number | null>(null);
+  const labels: Record<typeof service, string> = { edge: 'Edge', google: 'Google', rv: 'ResponsiveVoice' };
+  const onClick = async () => {
+    setBusy(true);
+    try {
+      const r = await window.inktts.cache.clearService(service);
+      if (r.ok) setLastBytes(r.bytesFreed || 0);
+      onCleared();
+    } finally {
+      setBusy(false);
+      setTimeout(() => setLastBytes(null), 2500);
+    }
+  };
+  return (
+    <AppButton tone="zinc" variant="flat" onClick={onClick} disabled={busy} title={`ลบ chunks cache ของ ${labels[service]}`}>
+      <Codicon name={busy ? 'sync' : 'trash'} size={13} spin={busy} />
+      <span>{busy ? 'กำลังล้าง...' : `ล้าง ${labels[service]}`}{lastBytes != null && ` (${formatBytes(lastBytes)})`}</span>
+    </AppButton>
   );
 }
 

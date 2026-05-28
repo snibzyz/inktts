@@ -70,5 +70,11 @@ contextBridge.exposeInMainWorld('inktts', {
   cache: {
     size: () => invoke('cache:size'),
     clear: () => invoke('cache:clear'),
+    clearService: (service) => invoke('cache:clearService', { service }),
+    clearFiles: (service, bases) => invoke('cache:clearFiles', { service, bases }),
+  },
+
+  output: {
+    clearFiles: (service, bases, opts) => invoke('output:clearFiles', { service, bases, ...(opts || {}) }),
   },
 });

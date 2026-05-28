@@ -188,6 +188,16 @@ declare global {
       cache: {
         size: () => Promise<{ ok: boolean; bytes: number; path?: string; error?: string }>;
         clear: () => Promise<{ ok: boolean; error?: string }>;
+        clearService: (service: ServiceKey) => Promise<{ ok: boolean; bytesFreed: number; error?: string }>;
+        clearFiles: (service: ServiceKey, bases: string[]) => Promise<{ ok: boolean; bytesFreed: number; error?: string }>;
+      };
+
+      output: {
+        clearFiles: (
+          service: ServiceKey,
+          bases: string[],
+          opts?: { outputDir?: string; ext?: 'm4a' | 'mp3' },
+        ) => Promise<{ ok: boolean; deleted: number; bytesFreed: number; failed?: { base: string; error: string }[]; error?: string }>;
       };
     };
   }

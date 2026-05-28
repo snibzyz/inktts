@@ -81,6 +81,63 @@ function clearCache() {
   } catch { return false; }
 }
 
+// ลบ cache เฉพาะ service เดียว — เรียกจากปุ่ม "เริ่มใหม่" ในหน้า ServicePanel
+// หรือจากปุ่ม per-service ในหน้า Settings
+function clearServiceCache(service) {
+  if (!service || typeof service !== 'string') return { ok: false, error: 'service required', bytesFreed: 0 };
+  const dir = path.join(getCacheRoot(), service);
+  let bytesFreed = 0;
+  try {
+    if (!fs.existsSync(dir)) return { ok: true, bytesFreed: 0 };
+    // คำนวณ size ก่อนลบ — ใช้บอก user ว่าเคลียร์ไปเท่าไหร่
+    const walk = (p) => {
+      let st;
+      try { st = fs.statSync(p); } catch { return; }
+      if (st.isFile()) { bytesFreed += st.size; return; }
+      if (!st.isDirectory()) return;
+      let entries;
+      try { entries = fs.readdirSync(p); } catch { return; }
+      for (const ent of entries) walk(path.join(p, ent));
+    };
+    walk(dir);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { ok: true, bytesFreed };
+  } catch (err) {
+    return { ok: false, error: err && err.message, bytesFreed };
+  }
+}
+
+// ลบ chunks ของไฟล์เฉพาะ (รายชื่อ base) — เผื่ออนาคต UI อยากเลือก granularity
+// สำหรับตอนนี้ ServicePanel ใช้ clearServiceCache (เคลียร์ทั้ง service) เป็นหลัก
+function clearFileChunks(service, bases) {
+  if (!service || !Array.isArray(bases)) return { ok: false, error: 'service+bases required', bytesFreed: 0 };
+  const baseDir = path.join(getCacheRoot(), service);
+  let bytesFreed = 0;
+  for (const base of bases) {
+    if (!base || typeof base !== 'string') continue;
+    // กัน path traversal: base ต้องเป็นชื่อไฟล์เดี่ยว ไม่มี / \ ..
+    if (base.includes('/') || base.includes('\\') || base.includes('..')) continue;
+    const p = path.join(baseDir, base);
+    try {
+      const st = fs.statSync(p);
+      if (st.isDirectory()) {
+        const walk = (q) => {
+          let s;
+          try { s = fs.statSync(q); } catch { return; }
+          if (s.isFile()) { bytesFreed += s.size; return; }
+          if (!s.isDirectory()) return;
+          let entries;
+          try { entries = fs.readdirSync(q); } catch { return; }
+          for (const ent of entries) walk(path.join(q, ent));
+        };
+        walk(p);
+        fs.rmSync(p, { recursive: true, force: true });
+      }
+    } catch { /* base dir ไม่มี — ข้าม */ }
+  }
+  return { ok: true, bytesFreed };
+}
+
 // ffmpeg-static path — packed inside asar.unpacked or dev node_modules
 //
 // Resolution order (return FIRST path that exists as file):
@@ -315,6 +372,8 @@ module.exports = {
   getServiceCacheDir,
   getCacheSize,
   clearCache,
+  clearServiceCache,
+  clearFileChunks,
   getFfmpegPath,
   getFfmpegPathDiagnostic,
   verifyFfmpeg,

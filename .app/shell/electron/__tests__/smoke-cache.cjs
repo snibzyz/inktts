@@ -20,7 +20,7 @@ require.cache[require.resolve('electron')] = {
   },
 };
 
-const { getCacheSize, clearCache, getCacheRoot, getServiceCacheDir } = require('../helpers/paths.cjs');
+const { getCacheSize, clearCache, clearServiceCache, clearFileChunks, getCacheRoot, getServiceCacheDir } = require('../helpers/paths.cjs');
 
 function fmtBytes(n) {
   if (n <= 0) return '0 B';
@@ -84,7 +84,49 @@ check('valid chunk survives sweep', fs.existsSync(validChunk));
 check('tmp leftover gone', !fs.existsSync(orphanTmp));
 check('partial leftover gone', !fs.existsSync(orphanPartial));
 
-// 4) cleanup
+// 4) cleanup before per-service tests
+clearCache();
+
+// 5) clearServiceCache — ลบ cache ของ service เดียวเท่านั้น
+const edgeDir = path.join(getServiceCacheDir('edge'), 'svc-test');
+const googleDir = path.join(getServiceCacheDir('google'), 'svc-test');
+fs.mkdirSync(edgeDir, { recursive: true });
+fs.mkdirSync(googleDir, { recursive: true });
+fs.writeFileSync(path.join(edgeDir, '000000.mp3'), Buffer.alloc(1500));
+fs.writeFileSync(path.join(googleDir, '000000.mp3'), Buffer.alloc(2500));
+
+const r1 = clearServiceCache('edge');
+check('clearServiceCache edge returns ok', r1.ok === true);
+check('clearServiceCache edge reports bytesFreed', r1.bytesFreed === 1500, `got ${r1.bytesFreed}`);
+check('edge cache gone after clearServiceCache', !fs.existsSync(edgeDir));
+check('google cache untouched', fs.existsSync(googleDir));
+
+// rejects bogus service name
+const r2 = clearServiceCache('');
+check('clearServiceCache rejects empty service', r2.ok === false);
+
+clearCache();
+
+// 6) clearFileChunks — ลบเฉพาะ bases ที่ระบุ
+const aDir = path.join(getServiceCacheDir('edge'), 'fileA');
+const bDir = path.join(getServiceCacheDir('edge'), 'fileB');
+const cDir = path.join(getServiceCacheDir('edge'), 'fileC');
+for (const d of [aDir, bDir, cDir]) {
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, '000000.mp3'), Buffer.alloc(1024));
+}
+const r3 = clearFileChunks('edge', ['fileA', 'fileC']);
+check('clearFileChunks ok', r3.ok === true);
+check('clearFileChunks bytesFreed', r3.bytesFreed === 2048, `got ${r3.bytesFreed}`);
+check('fileA gone', !fs.existsSync(aDir));
+check('fileB kept', fs.existsSync(bDir));
+check('fileC gone', !fs.existsSync(cDir));
+
+// path traversal guards
+const r4 = clearFileChunks('edge', ['../escape', 'sub/dir', '..\\nope']);
+check('clearFileChunks ignores traversal paths', r4.ok === true && r4.bytesFreed === 0);
+check('fileB still kept (traversal did not touch sibling)', fs.existsSync(bDir));
+
 clearCache();
 check('final clear', getCacheSize() === 0);
 
@@ -93,4 +135,4 @@ if (failures > 0) {
   console.error(`[FAIL] ${failures} check(s) failed`);
   process.exit(1);
 }
-console.log('[OK] all cache + sweep checks passed');
+console.log('[OK] all cache + sweep + per-service checks passed');
