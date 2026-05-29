@@ -157,9 +157,9 @@ function start(getMainWindowFn) {
     log.info('update check unsupported on this platform/mode', { platform: process.platform });
     return;
   }
-  // เคลียร์ marker ที่ค้างจาก swap ครั้งก่อน (Win portable เท่านั้น) —
+  // เคลียร์ marker ที่ค้างจาก swap/install ครั้งก่อน (Win portable + installed) —
   // Mac ไม่มี marker เพราะไม่ stage
-  if (portable.isPortableWin()) portable.pruneStaleMarker();
+  if (portable.isPortableWin() || portable.isInstalledWin()) portable.pruneStaleMarker();
 
   // ครั้งแรกหลัง 5 วิ (รอ UI พร้อม)
   setTimeout(() => {
@@ -231,8 +231,9 @@ function registerIpc() {
 }
 
 // เรียกตอน app quit — ถ้ามี staged update → apply เงียบ ๆ ก่อนปิดจริง
+// portable → swap exe + relaunch · installed → spawn Setup.exe /S --force-run
 function applyStagedOnQuit() {
-  if (!portable.isPortableWin()) return false;
+  if (!portable.isPortableWin() && !portable.isInstalledWin()) return false;
   const marker = portable.readStageMarker();
   if (!marker || !marker.path) return false;
   log.info('applying staged update on quit', marker);

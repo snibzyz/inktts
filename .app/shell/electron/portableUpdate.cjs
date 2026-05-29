@@ -36,8 +36,18 @@ function isMac() {
   return process.platform === 'darwin';
 }
 
+// Win สองโหมดที่ apply เองได้:
+//   portable  → helper.cmd move /Y swap .exe
+//   installed → helper.cmd spawn Setup.exe --updated /S --force-run (NSIS silent)
 function canAutoApply() {
-  return isPortableWin();
+  return isPortableWin() || isInstalledWin();
+}
+
+// 'portable' | 'installed' | null — ใช้เลือกชื่อ asset + วิธี apply
+function getWinMode() {
+  if (isPortableWin()) return 'portable';
+  if (isInstalledWin()) return 'installed';
+  return null;
 }
 
 function compareSemver(a, b) {
@@ -221,8 +231,11 @@ async function checkForUpdates() {
 //
 // ผลลัพธ์: user ไม่ต้องคลิก ไม่ต้องเห็นกล่องโต้ตอบ ครั้งหน้าที่เปิดแอพได้รุ่นใหม่ทันที
 
-function getStagePath(version) {
-  return path.join(app.getPath('temp'), `INKTTS-Portable-${version}.exe`);
+function getStagePath(version, mode) {
+  const name = (mode || getWinMode()) === 'installed'
+    ? `INKTTS-Setup-${version}.exe`
+    : `INKTTS-Portable-${version}.exe`;
+  return path.join(app.getPath('temp'), name);
 }
 
 function getStageMarkerPath() {
@@ -255,7 +268,7 @@ function clearStageMarker() {
 // (เช่น helper.cmd swap fail → app รีสตาร์ทกลับมาเป็นเวอร์ชันเดิม → marker ยังชี้ไป tmpExe เก่า)
 // ถ้า marker.version <= currentVersion → stale → ลบ
 function pruneStaleMarker() {
-  if (!isPortableWin()) return;
+  if (!isPortableWin() && !isInstalledWin()) return;
   const marker = readStageMarker();
   if (!marker || !marker.version) return;
   const current = app.getVersion();
@@ -267,30 +280,102 @@ function pruneStaleMarker() {
   }
 }
 
-// Stage = download only (no apply)
+// Stage = download only (no apply) — รองรับทั้ง portable (.exe swap) และ
+// installed (Setup.exe ที่จะรัน /S ทับ)
 async function stageUpdate(downloadUrl, version, onProgress) {
-  if (!isPortableWin()) throw new Error('portable Win only');
-  const tmpExe = getStagePath(version);
+  const mode = getWinMode();
+  if (!mode) throw new Error('portable/installed Win only');
+  const tmpExe = getStagePath(version, mode);
 
   // ถ้าไฟล์ stage อยู่แล้วและขนาดผ่าน sanity → skip download
   // (เกณฑ์เดียวกับ MIN_PORTABLE_SIZE ใน downloadFile — กันเอาไฟล์ truncated มา swap)
   if (fs.existsSync(tmpExe) && fs.statSync(tmpExe).size >= MIN_PORTABLE_SIZE) {
     const marker = readStageMarker();
     if (marker && marker.version === version && marker.path === tmpExe) {
-      log.info('already staged', { version, tmpExe });
-      return { staged: true, path: tmpExe, version };
+      log.info('already staged', { version, tmpExe, mode });
+      return { staged: true, path: tmpExe, version, mode };
     }
   }
 
-  log.info('staging update', { url: downloadUrl, to: tmpExe });
+  log.info('staging update', { url: downloadUrl, to: tmpExe, mode });
   await downloadFile(downloadUrl, tmpExe, onProgress);
-  writeStageMarker({ version, path: tmpExe, downloadedAt: new Date().toISOString() });
-  log.info('staged', { version, tmpExe });
-  return { staged: true, path: tmpExe, version };
+  writeStageMarker({ version, path: tmpExe, mode, downloadedAt: new Date().toISOString() });
+  log.info('staged', { version, tmpExe, mode });
+  return { staged: true, path: tmpExe, version, mode };
 }
 
-// Apply = swap + restart using already-staged file
+// Apply dispatcher — เลือกวิธีตาม mode ของไฟล์ที่ stage ไว้ (marker.mode)
+// portable → swap exe in-place · installed → spawn NSIS Setup.exe /S
 function applyStaged() {
+  const marker = readStageMarker();
+  const mode = (marker && marker.mode) || getWinMode();
+  if (mode === 'installed') return applyStagedInstalled();
+  return applyStagedPortable();
+}
+
+// Apply (installed/NSIS) = spawn helper.cmd ที่รอ 3 วิให้แอปปิดสนิท → รัน Setup.exe
+// ด้วย flag ชุดเดียวกับที่ electron-updater ใช้:
+//   --updated   : บอก NSIS ว่าเป็น update จากแอปที่กำลังรัน → รอ process จริงปิด
+//                 ก่อน uninstall+install (ไม่งั้น .exe ยัง lock → install ล้มทั้งดุ้น)
+//   /S          : silent oneClick (ไม่มีหน้าต่าง)
+//   --force-run : relaunch แอปหลัง install เสร็จ แม้ silent mode
+// ใช้ VBS wrapper hidden เหมือน portable — detached cmd.exe ไม่ honor windowsHide
+function applyStagedInstalled() {
+  if (!isInstalledWin()) {
+    log.warn('not installed Win — cannot apply NSIS installer');
+    return false;
+  }
+  const marker = readStageMarker();
+  if (!marker || !marker.path || !fs.existsSync(marker.path)) {
+    log.info('no staged installer to apply');
+    return false;
+  }
+  const installerPath = marker.path;
+
+  // กันซ้ำชั้นสอง: ก่อน spawn ตรวจขนาด — เผื่อไฟล์ stage หายไปครึ่งทาง
+  try {
+    const stagedSize = fs.statSync(installerPath).size;
+    if (stagedSize < MIN_PORTABLE_SIZE) {
+      log.warn('staged installer too small — aborting apply', { installerPath, stagedSize });
+      try { fs.unlinkSync(installerPath); } catch { /* noop */ }
+      clearStageMarker();
+      return false;
+    }
+  } catch (err) {
+    log.warn('staged installer stat failed — aborting apply', { error: err && err.message });
+    clearStageMarker();
+    return false;
+  }
+
+  const helperPath = path.join(app.getPath('temp'), `inktts-installer-${Date.now()}.cmd`);
+  const vbsPath = helperPath.replace(/\.cmd$/, '.vbs');
+  const script = [
+    '@echo off',
+    'timeout /t 3 /nobreak > nul 2>&1',
+    `start "" "${installerPath}" --updated /S --force-run`,
+    `del "${vbsPath}" 2>nul`,
+    '(goto) 2>nul & del "%~f0"',
+    '',
+  ].join('\r\n');
+  fs.writeFileSync(helperPath, script, 'utf8');
+
+  const cmdLine = `cmd.exe /c "${helperPath}"`.replace(/"/g, '""');
+  const vbsContent = `CreateObject("WScript.Shell").Run "${cmdLine}", 0, False\r\n`;
+  fs.writeFileSync(vbsPath, vbsContent, 'utf8');
+
+  spawn('wscript.exe', [vbsPath], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  }).unref();
+
+  clearStageMarker();
+  log.info('apply installed: NSIS helper spawned (silent via vbs)', { installerPath });
+  return true;
+}
+
+// Apply (portable) = swap + restart using already-staged file
+function applyStagedPortable() {
   if (!isPortableWin()) return false;
   const oldExe = process.env.PORTABLE_EXECUTABLE_FILE;
   if (!oldExe || !fs.existsSync(oldExe)) {
@@ -375,6 +460,7 @@ module.exports = {
   isPortableWin,
   isInstalledWin,
   isMac,
+  getWinMode,
   canAutoApply,
   checkForUpdates,
   downloadAndApply,

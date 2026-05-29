@@ -10,14 +10,17 @@ permissions:
   contents: write
 
 # INKTTS auto-update flow:
-#   - Win portable: built on windows-latest → portableUpdate.cjs polls /releases/latest API
-#                   every 30 min → silent stage + helper-cmd swap on quit
+#   - Win (nsis + portable): built on windows-latest → portableUpdate.cjs polls
+#                   /releases/latest API every 30 min → silent stage:
+#                     · portable  → helper-cmd swap .exe on quit
+#                     · installed → spawn Setup.exe --updated /S --force-run on quit
+#                   ทั้งสองโหมด attach ขึ้น release (Setup + Portable) เหมือน INKCRAW/INKIDEA
 #   - Mac (unsigned dmg): built on macos-latest (arm64) — cross-build x64 ด้วย
 #                          npm_config_arch=x64 → ffmpeg-static download x64 binary
 #                          ตอน install → Gatekeeper: user ต้อง "right-click → Open" รอบแรก
 jobs:
   package-win:
-    name: Package Windows portable
+    name: Package Windows (nsis + portable)
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -77,9 +80,9 @@ jobs:
         working-directory: .app/shell
         run: pnpm build
 
-      - name: Package Windows portable
+      - name: Package Windows (nsis + portable)
         working-directory: .app/shell
-        run: pnpm exec electron-builder --win portable --publish never
+        run: pnpm exec electron-builder --win nsis portable --publish never
 
       - name: Verify ffmpeg actually embedded in packaged app
         shell: bash
@@ -99,12 +102,25 @@ jobs:
           # spawn จริง — Windows runner เป็น x64 รัน .exe ได้ตรงๆ
           "$FFMPEG" -version | head -1
 
-      - name: Create download alias (latest)
+      - name: Verify both Win artifacts present (nsis + portable)
+        shell: bash
+        working-directory: .app/shell
+        run: |
+          set -euo pipefail
+          SETUP=$(find release -maxdepth 1 -name "INKTTS-Setup-*.exe" | head -1)
+          PORT=$(find release -maxdepth 1 -name "INKTTS-Portable-*.exe" | head -1)
+          [ -n "$SETUP" ] || { echo "FAIL: ไม่พบ INKTTS-Setup-*.exe (nsis build ล้มเหลว)"; ls -la release; exit 1; }
+          [ -n "$PORT" ]  || { echo "FAIL: ไม่พบ INKTTS-Portable-*.exe"; ls -la release; exit 1; }
+          echo "OK: $(basename "$SETUP") ($(wc -c < "$SETUP") bytes)"
+          echo "OK: $(basename "$PORT") ($(wc -c < "$PORT") bytes)"
+
+      - name: Create download aliases (latest)
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
           cd .app/shell/release
+          for f in INKTTS-Setup-*.exe;    do cp "$f" INKTTS-Setup-latest.exe; break; done
           for f in INKTTS-Portable-*.exe; do cp "$f" INKTTS-Portable-latest.exe; break; done
           ls -la
 
@@ -117,6 +133,7 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
+            .app/shell/release/INKTTS-Setup-*.exe
             .app/shell/release/INKTTS-Portable-*.exe
             .app/shell/release/latest*.yml
         env:

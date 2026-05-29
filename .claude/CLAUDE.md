@@ -112,15 +112,23 @@ INKTTS/
 | `tts` | start, cancel, onEvent (prog/limit/log/done/error) |
 | `merge` | start, detect, onLog, onDone |
 
-## 6. Auto-Update — Portable .exe
+## 6. Auto-Update — Win (Setup + Portable) + Mac
 
-ใช้ pattern เดียวกับ INKCRAW `portableUpdate.cjs`:
+Release ทุกตัว ship **ทั้ง NSIS Setup + Portable** (เหมือน INKCRAW/INKIDEA) ใน `portableUpdate.cjs`
+ตรวจจับโหมดด้วย `getWinMode()`: `portable` (มี `PORTABLE_EXECUTABLE_FILE`) / `installed` (NSIS, `app.isPackaged` แต่ไม่ใช่ portable)
 
 1. ทุก 30 นาที (และ 5 วิหลังเปิดแอพ) ดึง GitHub `releases/latest` API
-2. ถ้า `tag_name` ใหม่กว่า `app.getVersion()` → emit `app:updateAvailable` ให้ UI แสดง banner
-3. user กด "อัพเดต" → ดาวน์โหลด `INKTTS-Portable-<v>.exe` ไป `%TEMP%` (emit progress)
-4. spawn `cmd.exe /c <helper>.cmd` แบบ detached → script รอ 2 วิ → swap exe → start ใหม่ → ลบ helper
+2. ถ้า `tag_name` ใหม่กว่า `app.getVersion()` → emit `app:updateAvailable` + silent stage ไฟล์ตามโหมด:
+   - portable → `INKTTS-Portable-<v>.exe`
+   - installed → `INKTTS-Setup-<v>.exe`
+3. stage เสร็จ → emit `app:updateDownloaded` → UI แสดงปุ่ม "รีสตาร์ทเดี๋ยวนี้" (mode='portable' = auto ทั้งคู่)
+4. apply (กดปุ่ม หรือ `applyStagedOnQuit` ตอนปิดแอพ) → spawn helper.cmd hidden ผ่าน VBS:
+   - portable → `move /Y` swap .exe → `start` ใหม่
+   - installed → `Setup.exe --updated /S --force-run` (NSIS silent + relaunch)
 5. แอพปัจจุบัน `app.quit()`
+
+> Mac (ad-hoc signed) → `macUpdate.cjs` manual zip swap (Squirrel.Mac ต้องการ Developer ID)
+> `canAutoApply()` = portable หรือ installed · ขนาดไฟล์ stage ต้อง ≥ `MIN_PORTABLE_SIZE` (30MB) กันไฟล์ truncated
 
 repo info: `process.env.INKTTS_REPO` หรือ default `snibzyz/inktts`
 

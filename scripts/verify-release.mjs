@@ -84,8 +84,10 @@ async function verifyAssets(tag) {
   const headers = process.env.GH_TOKEN ? { Authorization: `Bearer ${process.env.GH_TOKEN}` } : {};
   const release = await fetchJson(`https://api.github.com/repos/${REPO}/releases/tags/${tag}`, headers);
   const assetNames = (release.assets || []).map((a) => a.name);
+  const ver = tag.replace(/^v/, '');
   const required = [
-    new RegExp(`^INKTTS-Portable-${tag.replace(/^v/, '')}\\.exe$`),
+    new RegExp(`^INKTTS-Setup-${ver}\\.exe$`),
+    new RegExp(`^INKTTS-Portable-${ver}\\.exe$`),
     /^latest\.yml$/,
   ];
   let ok = true;
@@ -96,7 +98,7 @@ async function verifyAssets(tag) {
   }
   if (!ok) process.exit(1);
   console.log(`\n✓ release พร้อมใช้: ${release.html_url}`);
-  console.log('  → ผู้ใช้ portable ปัจจุบันจะตรวจเจอ + อัปเดตอัตโนมัติภายใน 30 นาที');
+  console.log('  → ผู้ใช้ทั้ง Setup (NSIS) และ Portable จะตรวจเจอ + อัปเดตอัตโนมัติภายใน 30 นาที');
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }

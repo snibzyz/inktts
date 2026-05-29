@@ -24,10 +24,17 @@
 
 ### บนเครื่อง Windows
 
-1. ดาวน์โหลด **`INKTTS-Portable-x.x.x.exe`** จาก [หน้าดาวน์โหลด](https://github.com/snibzyz/inktts/releases/latest)
-2. วางที่ไหนก็ได้ — ไม่ต้องติดตั้ง เป็นไฟล์เดียวจบ
-3. ดับเบิลคลิกเปิด
-4. ถ้ามีแถบเตือนของ Windows → กด **More info** → **Run anyway**
+เลือกได้ 2 แบบจาก [หน้าดาวน์โหลด](https://github.com/snibzyz/inktts/releases/latest):
+
+| ไฟล์ที่โหลด | เหมาะกับ |
+|---|---|
+| **`INKTTS-Setup-x.x.x.exe`** | ติดตั้งปกติ — มี shortcut เดสก์ท็อป/Start Menu (แนะนำ) |
+| **`INKTTS-Portable-x.x.x.exe`** | ไฟล์เดียวจบ ไม่ต้องติดตั้ง วางที่ไหนก็รันได้ |
+
+1. ดับเบิลคลิกเปิด — **Setup** จะติดตั้งแล้วเปิดให้ · **Portable** เปิดได้เลย
+2. ถ้ามีแถบเตือนของ Windows → กด **More info** → **Run anyway**
+
+> ทั้งสองแบบอัปเดตอัตโนมัติ — ไม่ต้องมาโหลดใหม่เอง
 
 ### บนเครื่อง Mac
 
@@ -63,7 +70,7 @@
 
 ### อัปเดตอัตโนมัติ
 
-- **Windows (portable)**: ตรวจอัปเดตทุก 30 นาที — เมื่อมีเวอร์ชันใหม่จะมีแถบแจ้งด้านบน กดอัปเดตได้ทันที
+- **Windows (Setup + Portable)**: ตรวจอัปเดตทุก 30 นาที — เมื่อมีเวอร์ชันใหม่จะมีแถบแจ้งด้านบน กดอัปเดตได้ทันที ระบบดาวน์โหลด + ติดตั้งทับให้เงียบ ๆ แล้วเปิดใหม่อัตโนมัติ
 - **Mac**: แจ้งเตือนเมื่อมีเวอร์ชันใหม่ — คลิก "ดาวน์โหลด" เพื่อโหลด `.dmg` ใหม่
 
 ---
@@ -279,7 +286,7 @@ INKTTS มี 3 บริการเสียงฟรีให้เลือ�
 - ผลตรวจ:
   - **"พบเวอร์ชันใหม่"** — แถบสีเขียว
   - **"เป็นเวอร์ชันล่าสุดแล้ว"** — แถบสีเทา
-  - **"ตรวจไม่ได้"** — แถบสีเหลือง (ใช้ได้เฉพาะรุ่น Portable บน Windows)
+  - **"ตรวจไม่ได้"** — แถบสีเหลือง (อัปเดตอัตโนมัติใช้ได้ทั้ง Setup + Portable บน Windows และ Mac)
 
 ### กลุ่ม "เกี่ยวกับ"
 
@@ -354,7 +361,7 @@ INKTTS เป็น **Electron + React + TypeScript + Vite + Tailwind** ใน�
 ```bash
 pnpm install                 # ติดตั้ง dependency
 pnpm dev                     # โหมดพัฒนา (Vite + Electron hot-reload)
-pnpm package:win             # build Windows portable .exe
+pnpm package:win             # build Windows Setup (NSIS) + Portable .exe
 pnpm package:mac             # build macOS .dmg (ต้องรันบน Mac)
 pnpm release 2.1.0           # bump version + tag + push → trigger CI build
 pnpm smoke:tts edge          # smoke test เครื่องเดียว: edge | google | rv
