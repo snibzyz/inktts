@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { ServiceKey, ProgStatus } from '@/types/inktts';
 
-export type ViewKey = ServiceKey | 'merge' | 'settings';
+export type ViewKey = ServiceKey | 'queue' | 'merge' | 'settings';
 
 export interface FileRowState {
   base: string;
@@ -51,12 +51,16 @@ export interface ServiceState {
 
 export interface MergeState {
   srcDir: string;
+  /** โฟลเดอร์ปลายทาง — null = ใช้ default `<srcDir>_merged` */
+  dstDir: string | null;
   prefix: string;
   start: number;
   end: number;
   group: number;
   ext: 'm4a' | 'mp3';
-  detected: { prefix: string; start: number; end: number; count: number } | null;
+  /** เติมศูนย์เลขตอนในชื่อไฟล์ผลลัพธ์ — 0 = อัตโนมัติ (เท่าเลขมากสุด), N = N หลัก */
+  pad: number;
+  detected: { prefix: string; start: number; end: number; count: number; pad?: number } | null;
   running: boolean;
   log: { level: string; message: string }[];
   result: { totalGroups: number; failed: number } | null;
@@ -165,7 +169,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   // เริ่มที่ preset MAX เสมอ (index 0) — AdaptiveLimiter จะลดเพดานอัตโนมัติเมื่อ throttle
   services: {
-    edge: initialServiceState(0, 50, 1, { voice: 'th-TH-PremwadeeNeural', rate: '+30%', 'lines-per-chunk': 1 }),
+    edge: initialServiceState(0, 50, 1, { voice: 'th-TH-PremwadeeNeural', rate: '+0%', 'lines-per-chunk': 1 }),
     google: initialServiceState(0, 10, 2, { tempo: 1.3, 'chunk-chars': 120, jitter: 0.1 }),
     rv: initialServiceState(0, 8, 1, { gender: 'female', tempo: 1.3, rate: 0.5, 'chunk-chars': 100 }),
   },
@@ -241,11 +245,13 @@ export const useStore = create<AppState>((set, get) => ({
 
   merge: {
     srcDir: '',
+    dstDir: null,
     prefix: '',
     start: 1,
     end: 10,
     group: 10,
     ext: 'm4a',
+    pad: 4,
     detected: null,
     running: false,
     log: [],

@@ -60,6 +60,22 @@ contextBridge.exposeInMainWorld('inktts', {
     onDone: (handler) => subscribe('merge:done', handler),
   },
 
+  queue: {
+    snapshot: () => invoke('queue:snapshot'),
+    add: (item) => invoke('queue:add', item),
+    update: (id, patch) => invoke('queue:updateItem', { id, patch }),
+    remove: (id) => invoke('queue:remove', { id }),
+    clearDone: () => invoke('queue:clearDone'),
+    move: (id, toIndex) => invoke('queue:move', { id, toIndex }),
+    start: (id) => invoke('queue:start', { id }),
+    startAll: () => invoke('queue:startAll'),
+    cancel: (id) => invoke('queue:cancel', { id }),
+    cancelAll: () => invoke('queue:cancelAll'),
+    onUpdate: (handler) => subscribe('queue:update', handler),
+    onLog: (handler) => subscribe('queue:log', handler),
+    onNotice: (handler) => subscribe('queue:notice', handler),
+  },
+
   settings: {
     get: () => invoke('settings:get'),
     patch: (partial) => invoke('settings:patch', partial),

@@ -7,8 +7,11 @@
 import { useStore } from '@/state/store';
 import type { ServiceKey } from '@/types/inktts';
 
+// หมายเหตุ: 'outputDir' ตั้งใจ "ไม่" persist — user ชอบลืมว่าเคยเปลี่ยน output folder
+// ไปที่อื่น (เช่น Downloads) แล้วไฟล์ไปโผล่ผิดที่ → ทุกครั้งที่เปิดแอปจะรีเซ็ตกลับ
+// default (<global outputDir>/<service-subdir>) เสมอ. ภายใน session ยังเลือกเองได้
 const PERSIST_KEYS: Array<keyof ReturnType<typeof useStore.getState>['services'][ServiceKey]> = [
-  'presetIdx', 'batch', 'conn', 'fieldValues', 'limitN', 'limitAll', 'advancedOpen', 'outputDir',
+  'presetIdx', 'batch', 'conn', 'fieldValues', 'limitN', 'limitAll', 'advancedOpen',
 ];
 
 function pickServicePersist(s: any) {
@@ -38,7 +41,7 @@ export async function hydrate() {
         ...(saved.limitN != null ? { limitN: saved.limitN } : {}),
         ...(saved.limitAll != null ? { limitAll: saved.limitAll } : {}),
         ...(saved.advancedOpen != null ? { advancedOpen: saved.advancedOpen } : {}),
-        ...(saved.outputDir !== undefined ? { outputDir: saved.outputDir } : {}),
+        // outputDir: ไม่ hydrate — เริ่มเป็น default (null) ทุกครั้งที่เปิดแอป (ดู PERSIST_KEYS)
       });
     }
   }
@@ -55,6 +58,7 @@ export async function hydrate() {
       ...(s.merge.prefix ? { prefix: s.merge.prefix } : {}),
       ...(s.merge.group != null ? { group: s.merge.group } : {}),
       ...(s.merge.ext ? { ext: s.merge.ext } : {}),
+      ...(s.merge.pad != null ? { pad: s.merge.pad } : {}),
     });
   }
 }
@@ -76,6 +80,7 @@ function persistNow() {
       prefix: st.merge.prefix,
       group: st.merge.group,
       ext: st.merge.ext,
+      pad: st.merge.pad,
     },
   };
   window.inktts.settings.patch(payload).catch(() => { /* noop */ });
@@ -98,7 +103,7 @@ export function startAutosave() {
         rv: pickServicePersist(state.services.rv),
       },
       view: state.view,
-      merge: { srcDir: state.merge.srcDir, prefix: state.merge.prefix, group: state.merge.group, ext: state.merge.ext },
+      merge: { srcDir: state.merge.srcDir, prefix: state.merge.prefix, group: state.merge.group, ext: state.merge.ext, pad: state.merge.pad },
     });
     if (slice !== last) {
       last = slice;

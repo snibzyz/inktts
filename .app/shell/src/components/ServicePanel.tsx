@@ -9,6 +9,7 @@ import { AppButton } from '@/ui/AppButton';
 import { AppCard } from '@/ui/AppCard';
 import { cn } from '@/ui/cn';
 import { reportError } from '@/lib/errorBus';
+import { formatClock, formatDuration, formatEta } from '@/lib/formatTime';
 
 interface Props { serviceKey: ServiceKey }
 
@@ -682,11 +683,20 @@ export function ServicePanel({ serviceKey }: Props) {
             {state.rows.length === 0 ? 'พร้อมเริ่มงาน' :
               `ทั้งหมด ${state.rows.length}  ·  สำเร็จ ${stats.ok}  ·  ล้มเหลว ${stats.fail}  ·  รอ ${state.rows.length - stats.finished - stats.skip}  ·  ข้าม ${stats.skip}`}
           </div>
+          {(running || stats.elapsed > 0) && (
+            <div className="text-[12px] text-vscode-fg-dim inline-flex items-center gap-1.5" title={`ใช้เวลา ${formatDuration(stats.elapsed * 1000)}`}>
+              <Codicon name="clock" size={13} className="text-vscode-muted" />
+              ใช้ไป <span className="font-mono tabular-nums text-vscode-fg">{formatClock(stats.elapsed * 1000)}</span>
+            </div>
+          )}
           {stats.finished > 0 && (
-            <div className="text-[12px] text-vscode-fg-dim">เฉลี่ย {stats.avg.toFixed(2)} วินาที/ไฟล์</div>
+            <div className="text-[12px] text-vscode-fg-dim">เฉลี่ย {formatDuration(stats.avg * 1000)}/ไฟล์</div>
           )}
           {running && stats.eta > 0 && (
-            <div className="text-[12px] text-vscode-fg-dim">เหลืออีก ≈ {Math.round(stats.eta)} วินาที</div>
+            <div className="text-[12px] text-vscode-fg-dim inline-flex items-center gap-1.5">
+              <Codicon name="watch" size={13} className="text-vscode-muted" />
+              เหลืออีก {formatEta(stats.eta * 1000)}
+            </div>
           )}
           {state.limitInfo && (
             <div className={cn('text-[12px] flex items-center gap-1.5', state.limitInfo.kind === 'shrink' ? 'text-vscode-warning' : 'text-vscode-success')}>

@@ -42,10 +42,13 @@ function detectAudioFiles(srcDir, ext = 'm4a') {
   const m = /^(.*?)(\d+)/.exec(firstStem);
   const start = m ? parseInt(m[2], 10) : 1;
   const prefix = m ? m[1] : '';
-  return { count: files.length, start, end: start + files.length - 1, prefix };
+  // auto-detect padding: ถ้าเลขในชื่อไฟล์ต้นทางเติมศูนย์ไว้ (เช่น "ตอน 001") → เดาเป็น 3 หลัก
+  //   pad = จำนวนหลักของกลุ่มตัวเลขแรกในไฟล์แรก (0 = ไม่เจอเลข → auto ทีหลัง)
+  const pad = m ? m[2].length : 0;
+  return { count: files.length, start, end: start + files.length - 1, prefix, pad };
 }
 
-async function mergeGroups({ srcDir, dstDir, outPrefix, prefix, start, end, group, ext = 'm4a', onLog }) {
+async function mergeGroups({ srcDir, dstDir, outPrefix, prefix, start, end, group, ext = 'm4a', pad = 0, onLog }) {
   const log = onLog || (() => {});
   fs.mkdirSync(dstDir, { recursive: true });
 
@@ -54,6 +57,10 @@ async function mergeGroups({ srcDir, dstDir, outPrefix, prefix, start, end, grou
   if (!Number.isFinite(group) || group < 1) group = 10;
   start = Math.max(1, Math.floor(Number(start) || 1));
   end = Math.floor(Number(end) || 0);
+  // pad = จำนวนหลักของเลขตอนในชื่อไฟล์ (เติมศูนย์ซ้าย)
+  //   pad <= 0 → ไม่เติมศูนย์ (เลขดิบ เช่น 1-100)
+  //   pad >= 1 → เติมให้ครบ N หลัก (เช่น pad=4 → 0001-0100)
+  pad = Math.floor(Number(pad) || 0);
 
   // เอาทุกไฟล์ที่นามสกุลตรง เรียงตามชื่อ — ไม่สนใจว่าชื่ออะไร
   const files = listAudioFiles(srcDir, ext);
@@ -67,7 +74,10 @@ async function mergeGroups({ srcDir, dstDir, outPrefix, prefix, start, end, grou
   // ถ้า end ไม่ valid (เช่น ผู้ใช้แก้ start แล้วลืมแก้ end) → รวมทุกไฟล์
   const wanted = end >= start ? end - start + 1 : files.length;
   const selected = files.slice(0, Math.min(wanted, files.length));
-  log('info', `พบ ${files.length} ไฟล์ — จะรวม ${selected.length} ไฟล์ กลุ่มละ ${group} ตอน`);
+
+  // เลขตอนในชื่อไฟล์ผลลัพธ์: pad>0 → เติมศูนย์ให้ครบ N หลัก · pad<=0 → ไม่เติม (เลขดิบ)
+  const padNum = pad > 0 ? (n) => String(n).padStart(pad, '0') : (n) => String(n);
+  log('info', `พบ ${files.length} ไฟล์ — จะรวม ${selected.length} ไฟล์ กลุ่มละ ${group} ตอน · เลขตอน ${pad > 0 ? pad + ' หลัก' : 'ไม่เติมศูนย์'}`);
 
   let totalGroups = 0;
   let failed = 0;
@@ -75,7 +85,7 @@ async function mergeGroups({ srcDir, dstDir, outPrefix, prefix, start, end, grou
     const chunk = selected.slice(offset, offset + group);
     const n1 = start + offset;
     const n2 = start + offset + chunk.length - 1;
-    const outName = `${namePrefix}${n1}-${n2}.${ext}`;
+    const outName = `${namePrefix}${padNum(n1)}-${padNum(n2)}.${ext}`;
     const outPath = path.join(dstDir, outName);
     const listPath = path.join(dstDir, `.list-${n1}-${n2}.txt`);
     const groupFiles = chunk.map((name) => path.join(srcDir, name));

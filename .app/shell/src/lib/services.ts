@@ -50,8 +50,8 @@ export const SERVICES: ServiceDef[] = [
         options: ['th-TH-PremwadeeNeural', 'th-TH-NiwatNeural'],
         optionLabels: ['Premwadee (หญิง)', 'Niwat (ชาย)'],
       },
-      // ความเร็วเสียง: เก็บ % โดยตรง (-50% ถึง +100%), step 5%
-      { name: 'rate', kind: 'rate', label: 'ความเร็วเสียง', default: 30, min: -50, max: 100, step: 5, unit: '%' },
+      // ความเร็วเสียง: เก็บ % โดยตรง (-50% ถึง +100%), step 5% — default 0% (ความเร็วปกติ)
+      { name: 'rate', kind: 'rate', label: 'ความเร็วเสียง', default: 0, min: -50, max: 100, step: 5, unit: '%' },
       { name: 'lines-per-chunk', kind: 'spinbox', label: 'จำนวนบรรทัดต่อส่วนเสียง', default: 1, min: 1, max: 50, advanced: true },
     ],
   },

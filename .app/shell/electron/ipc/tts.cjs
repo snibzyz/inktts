@@ -50,7 +50,7 @@ function registerTtsIpc(getMainWindow) {
   });
 
   ipcMain.handle('merge:start', async (_e, payload) => {
-    const { srcDir, dstDir, prefix, outPrefix, start, end, group, ext } = payload || {};
+    const { srcDir, dstDir, prefix, outPrefix, start, end, group, ext, pad } = payload || {};
     if (!srcDir || start == null || end == null) {
       return { ok: false, error: 'missing src/start/end' };
     }
@@ -68,6 +68,7 @@ function registerTtsIpc(getMainWindow) {
         end: Number(end),
         group: Number(group) || 10,
         ext: ext || 'm4a',
+        pad: Number(pad) || 0,
         onLog: sendLog,
       });
       if (w && !w.isDestroyed()) w.webContents.send('merge:done', result);

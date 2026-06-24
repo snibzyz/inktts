@@ -108,8 +108,11 @@ async function ffmpegConcat(chunkPaths, listPath, outputPath, fmt, tempo = 1.0) 
     args = [...baseArgs, '-c', 'copy', outTmp];
   } else {
     const codec = fmt === 'm4a' ? ['-c:a', 'aac', '-b:a', '128k'] : ['-c:a', 'libmp3lame', '-b:a', '128k'];
+    // m4a: ย้าย moov atom ไปต้นไฟล์ (faststart) → เล่น/สตรีมได้ทันทีไม่ต้องโหลดจบ
+    // (mp3 ไม่มี moov atom — เว้นไว้ ไม่งั้น ffmpeg จะ error "Option movflags not found")
+    const faststart = fmt === 'm4a' ? ['-movflags', '+faststart'] : [];
     const atempo = needsAtempo ? ['-filter:a', `atempo=${tempo}`] : [];
-    args = [...baseArgs, ...atempo, ...codec, outTmp];
+    args = [...baseArgs, ...atempo, ...codec, ...faststart, outTmp];
   }
   const listPreview = previewLines(lines);
   const { code, stderr, durationMs, spawnError } = await run(ffmpeg, args);
@@ -183,7 +186,12 @@ async function ffmpegConcatCopy(chunkPaths, listPath, outputPath) {
     return { ok: false, error: `เขียน list.txt ไม่ได้: ${err && err.message}`, details: { reason: 'list-write-failed', ffmpegPath: ffmpeg, listPath, writeError: err && err.message } };
   }
   const outTmp = makeOutTmp(outputPath);
-  const args = ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', outTmp];
+  // m4a/mp4: ย้าย moov atom ไปต้นไฟล์ (faststart) — แม้ใช้ -c copy ก็ remux header ใหม่ได้
+  // (mp3 ไม่มี moov atom — เว้นไว้ ไม่งั้น ffmpeg จะ error)
+  const outExt = path.extname(outputPath).toLowerCase();
+  const isMp4Container = outExt === '.m4a' || outExt === '.mp4' || outExt === '.m4b' || outExt === '.mov';
+  const faststart = isMp4Container ? ['-movflags', '+faststart'] : [];
+  const args = ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', ...faststart, outTmp];
   const listPreview = previewLines(lines);
   const { code, stderr, durationMs, spawnError } = await run(ffmpeg, args);
   if (code !== 0) {

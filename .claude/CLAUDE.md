@@ -140,6 +140,7 @@ repo info: `process.env.INKTTS_REPO` หรือ default `snibzyz/inktts`
 - **Smoke test**:
   - `pnpm smoke:tts edge|google|rv` — รัน engine ตรง ๆ บน 200-char sample → ตรวจว่าได้ `.m4a` > 1KB
   - `pnpm smoke:merge` — รัน merge บน `output/edge/*.m4a` ที่มีอยู่แล้ว
+  - `pnpm smoke:queue [edge,google,rv]` — full queue test: รันคิวจริงผ่านทุก engine เรียงกัน → ตรวจ sequential + `.m4a` faststart + timing + persistence (default ครบ 3 engine)
 
 ## 8. Verification Rules — ห้ามรายงานเสร็จก่อนเทส
 

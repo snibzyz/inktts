@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { FileRowState } from '@/state/store';
 import { Codicon } from '@/ui/Codicon';
 import { cn } from '@/ui/cn';
+import { formatClock, formatDuration } from '@/lib/formatTime';
 
 const STATUS_INFO: Record<string, { icon: string; color: string; spin?: boolean; text?: string }> = {
   WORK: { icon: 'sync', color: 'text-vscode-fg-dim', spin: true },
@@ -38,7 +39,8 @@ export function FileRow({ row }: { row: FileRowState }) {
   else if (row.status === 'PENDING') barColor = 'bg-vscode-muted/30';
 
   const name = row.base.length > 36 ? row.base.slice(0, 33) + '…' : row.base;
-  const elapsedText = elapsed == null ? '—' : `${elapsed.toFixed(1)}s`;
+  const elapsedMs = elapsed == null ? null : elapsed * 1000;
+  const elapsedText = formatClock(elapsedMs);
   const hasError = (row.status === 'FAIL' || row.status === 'FFMPEG_FAIL') && !!row.error;
   const d = row.details;
 
@@ -129,7 +131,10 @@ export function FileRow({ row }: { row: FileRowState }) {
           <div className={cn('h-full transition-[width] duration-200', barColor)} style={{ width: `${frac * 100}%` }} />
         </div>
         <div className="text-[10px] text-vscode-muted tabular-nums w-14 text-right">{row.done}/{row.total}</div>
-        <div className="text-[10px] text-vscode-muted tabular-nums w-12 text-right">{elapsedText}</div>
+        <div
+          className="text-[10px] text-vscode-muted tabular-nums w-[64px] text-right font-mono"
+          title={elapsedMs == null ? undefined : `ใช้เวลา ${formatDuration(elapsedMs)}`}
+        >{elapsedText}</div>
       </div>
       {hasError && errorOpen && (
         <div className="mt-2 bg-vscode-editor border border-vscode-error/30 rounded-sm p-2 space-y-2">

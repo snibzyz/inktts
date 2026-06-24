@@ -7,6 +7,7 @@ const ICONS: Record<string, string> = {
   edge: 'star-full',
   google: 'globe',
   rv: 'mic',
+  queue: 'list-ordered',
   merge: 'combine',
 };
 
@@ -34,6 +35,12 @@ export function Sidebar() {
       ))}
 
       <SectionLabel className="mt-3">เครื่องมือ</SectionLabel>
+      <NavItem
+        active={view === 'queue'}
+        icon={ICONS.queue}
+        label="คิวรายเรื่อง"
+        onClick={() => setView('queue')}
+      />
       <NavItem
         active={view === 'merge'}
         icon={ICONS.merge}

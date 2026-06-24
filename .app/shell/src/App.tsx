@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '@/state/store';
+import { useQueueStore } from '@/state/queueStore';
 import { Sidebar } from '@/components/Sidebar';
 import { ServicePanel } from '@/components/ServicePanel';
+import { QueuePanel } from '@/components/QueuePanel';
 import { MergePanel } from '@/components/MergePanel';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { UpdateBanner } from '@/components/UpdateBanner';
@@ -17,14 +19,26 @@ export function App() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // โหลด settings + appRoot/inputDir/outputDir ก่อนแสดง UI
+    // โหลด settings + appRoot/inputDir/outputDir + คิว ก่อนแสดง UI
     Promise.all([
       hydrate(),
       window.inktts.fs.getAppRoot().then(setRoots),
+      useQueueStore.getState().load(),
     ]).finally(() => {
       setReady(true);
       // เริ่ม autosave หลัง hydrate เสร็จ — กันบันทึก default ทับของจริง
       startAutosave();
+    });
+
+    // คิว: รับ event push จาก main process (update/log/notice)
+    const offQUpdate = window.inktts.queue.onUpdate((evt) => useQueueStore.getState().applyUpdate(evt));
+    const offQLog = window.inktts.queue.onLog((evt) => useQueueStore.getState().appendLog(evt));
+    const offQNotice = window.inktts.queue.onNotice((n) => {
+      // ช่องทาง toast เดียวที่มีคือ Error Toast — ใช้แจ้งเตือน throttle/retry/ล้มเหลว
+      if (n.kind === 'throttle') reportError({ source: 'คิว · จำกัดเรท', message: n.message });
+      else if (n.kind === 'retry') reportError({ source: 'คิว · ลองใหม่อัตโนมัติ', message: n.message });
+      else if (n.kind === 'failed' || n.kind === 'done-with-errors') reportError({ source: 'คิว', message: n.message });
+      // 'done' (สำเร็จ) → ไม่ต้อง toast เห็นในหน้าคิวแล้ว
     });
     const offAvail = window.inktts.app.onUpdateAvailable((info) => {
       const auto = info.mode === 'portable';
@@ -84,6 +98,7 @@ export function App() {
 
     return () => {
       offAvail(); offProg(); offDone(); offErr(); offTtsEvt();
+      offQUpdate(); offQLog(); offQNotice();
       window.removeEventListener('error', onWindowErr);
       window.removeEventListener('unhandledrejection', onRejection);
     };
@@ -99,7 +114,8 @@ export function App() {
       <UpdateBanner />
       <div className="flex-1 flex overflow-hidden">
         <Sidebar />
-        {view === 'merge' ? <MergePanel /> :
+        {view === 'queue' ? <QueuePanel /> :
+         view === 'merge' ? <MergePanel /> :
          view === 'settings' ? <SettingsPanel /> :
          <ServicePanel serviceKey={view} />}
       </div>

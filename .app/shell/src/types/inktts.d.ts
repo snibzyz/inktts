@@ -97,6 +97,62 @@ export interface UpdateInfo {
   releaseDate?: string;
 }
 
+// ───────── Queue (คิวรายเรื่อง — รันทีละเรื่อง) ─────────
+export type QueueItemStatus =
+  | 'idle'           // ยังไม่เริ่ม
+  | 'queued'         // รออยู่ในคิว
+  | 'running'        // กำลังแปลง
+  | 'done'           // เสร็จครบ
+  | 'done-with-errors' // เสร็จแต่บางไฟล์ล้มเหลว (ลองใหม่หมดแล้ว)
+  | 'failed'         // ล้มเหลวก่อนเริ่ม (ไม่มีไฟล์ ฯลฯ)
+  | 'cancelled';     // ถูกยกเลิก
+
+export interface QueueItem {
+  id: string;
+  name: string;
+  service: ServiceKey;
+  presetIdx: number;
+  fieldValues: Record<string, any>;
+  /** engine opts ที่ renderer build ไว้แล้ว (buildOptionsFromFields + batchSize/connectionsPerFile) */
+  runOptions: Record<string, any>;
+  /** โฟลเดอร์ต้นทาง — ใช้เมื่อไม่ได้เลือกไฟล์รายตัว (list .txt ทั้งโฟลเดอร์) */
+  inputDir: string;
+  /** ไฟล์ .txt ที่เลือกรายตัว — ถ้ามี ใช้ตามนี้แทน inputDir */
+  inputFiles: string[];
+  outputDir: string;
+  status: QueueItemStatus;
+  jobId: string | null;
+  progress: { done: number; fail: number; total: number; current: string | null };
+  retryCount: number;
+  throttled: boolean;
+  error: string | null;
+  /** ms timestamp ที่เริ่มรันจริงครั้งแรก (รวม retry) — null ถ้ายังไม่เริ่ม */
+  startedAt: number | null;
+  /** ms timestamp ที่จบ (terminal) — null ถ้ายังรันอยู่ */
+  endedAt: number | null;
+  /** เวลาที่ใช้แต่ละตอน (ไฟล์) แยก — วินาที */
+  times: { base: string; sec: number }[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface QueueAddInput {
+  name: string;
+  service: ServiceKey;
+  presetIdx: number;
+  fieldValues: Record<string, any>;
+  runOptions: Record<string, any>;
+  inputDir: string;
+  inputFiles?: string[];
+  outputDir: string;
+}
+
+export type QueueUpdateEvent =
+  | { type: 'snapshot'; items: QueueItem[] }
+  | { type: 'item'; item: QueueItem };
+export interface QueueLogEvent { itemId: string; level: string; message: string; ts: number; }
+export interface QueueNoticeEvent { itemId: string; kind: 'throttle' | 'retry' | 'done' | 'done-with-errors' | 'failed'; message: string; }
+
 declare global {
   interface Window {
     inktts: {
@@ -167,8 +223,8 @@ declare global {
         onEvent: (handler: (evt: TtsEvent) => void) => () => void;
       };
       merge: {
-        start: (payload: { srcDir: string; dstDir?: string; prefix?: string; outPrefix?: string; start: number; end: number; group: number; ext?: string }) => Promise<{ ok: boolean; totalGroups?: number; failed?: number; error?: string }>;
-        detect: (srcDir: string, ext?: string) => Promise<{ prefix: string; start: number; end: number; count: number } | null>;
+        start: (payload: { srcDir: string; dstDir?: string; prefix?: string; outPrefix?: string; start: number; end: number; group: number; ext?: string; pad?: number }) => Promise<{ ok: boolean; totalGroups?: number; failed?: number; error?: string }>;
+        detect: (srcDir: string, ext?: string) => Promise<{ prefix: string; start: number; end: number; count: number; pad?: number } | null>;
         onLog: (handler: (msg: { level: string; message: string }) => void) => () => void;
         onDone: (handler: (result: { totalGroups: number; failed: number }) => void) => () => void;
       };
@@ -199,6 +255,22 @@ declare global {
           opts?: { outputDir?: string; ext?: 'm4a' | 'mp3' },
         ) => Promise<{ ok: boolean; deleted: number; bytesFreed: number; failed?: { base: string; error: string }[]; error?: string }>;
       };
+
+      queue: {
+        snapshot: () => Promise<{ items: QueueItem[] }>;
+        add: (item: QueueAddInput) => Promise<QueueItem>;
+        update: (id: string, patch: Partial<QueueAddInput>) => Promise<{ ok: boolean; error?: string }>;
+        remove: (id: string) => Promise<{ ok: boolean; error?: string }>;
+        clearDone: () => Promise<{ ok: boolean }>;
+        move: (id: string, toIndex: number) => Promise<{ ok: boolean; error?: string }>;
+        start: (id: string) => Promise<{ ok: boolean; error?: string }>;
+        startAll: () => Promise<{ ok: boolean }>;
+        cancel: (id: string) => Promise<{ ok: boolean; error?: string }>;
+        cancelAll: () => Promise<{ ok: boolean }>;
+        onUpdate: (handler: (evt: QueueUpdateEvent) => void) => () => void;
+        onLog: (handler: (evt: QueueLogEvent) => void) => () => void;
+        onNotice: (handler: (evt: QueueNoticeEvent) => void) => () => void;
+      };
     };
   }
 }
@@ -219,8 +291,8 @@ export interface PersistedSettings {
   version: number;
   paths: { inputDir: string | null; outputDir: string | null };
   services: Record<ServiceKey, PersistedServiceState | null>;
-  merge: { srcDir?: string; prefix?: string; group?: number; ext?: 'm4a' | 'mp3' } | null;
+  merge: { srcDir?: string; prefix?: string; group?: number; ext?: 'm4a' | 'mp3'; pad?: number } | null;
   view: ViewKey;
 }
 
-type ViewKey = ServiceKey | 'merge' | 'settings';
+type ViewKey = ServiceKey | 'queue' | 'merge' | 'settings';

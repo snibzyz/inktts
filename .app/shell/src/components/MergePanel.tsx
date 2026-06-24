@@ -4,6 +4,7 @@ import { Codicon } from '@/ui/Codicon';
 import { AppButton } from '@/ui/AppButton';
 import { AppCard } from '@/ui/AppCard';
 import { Input, Select } from '@/ui/Input';
+import { NumberField } from '@/ui/NumberField';
 import { cn } from '@/ui/cn';
 import { reportError } from '@/lib/errorBus';
 
@@ -45,7 +46,9 @@ export function MergePanel() {
     setMerge({ srcDir: dir });
     const det = await window.inktts.merge.detect(dir, merge.ext);
     if (det) {
-      setMerge({ detected: det, prefix: det.prefix, start: det.start, end: det.end });
+      // auto-detect padding จากชื่อไฟล์ต้นทาง — override เฉพาะถ้า input เติมศูนย์จริง (>1 หลัก)
+      // ไม่งั้นคงค่า default ไว้ (เช่น input "ตอน 1" ไม่ override default 4)
+      setMerge({ detected: det, prefix: det.prefix, start: det.start, end: det.end, ...(det.pad && det.pad > 1 ? { pad: det.pad } : {}) });
     } else {
       setMerge({ detected: null });
     }
@@ -55,29 +58,40 @@ export function MergePanel() {
     setMerge({ ext });
     if (merge.srcDir) {
       const det = await window.inktts.merge.detect(merge.srcDir, ext);
-      if (det) setMerge({ detected: det, prefix: det.prefix, start: det.start, end: det.end });
+      if (det) setMerge({ detected: det, prefix: det.prefix, start: det.start, end: det.end, ...(det.pad && det.pad > 1 ? { pad: det.pad } : {}) });
       else setMerge({ detected: null });
     }
   };
 
   const previewLines = useMemo(() => {
     if (!merge.prefix || merge.start > merge.end || merge.group < 1) return { items: [] as string[], total: 0 };
-    const out: string[] = [];
+    // แบ่งกลุ่มก่อน เพื่อหาเลขมากสุด → ใช้คำนวณความกว้าง padding (กรณีอัตโนมัติ)
+    const ranges: Array<[number, number]> = [];
     let i = merge.start;
-    while (i <= merge.end && out.length < 4) {
+    while (i <= merge.end) {
       const j = Math.min(i + merge.group - 1, merge.end);
-      out.push(`${merge.prefix}${i}-${j}.${merge.ext}`);
+      ranges.push([i, j]);
       i = j + 1;
     }
-    let total = 0;
-    let k = merge.start;
-    while (k <= merge.end) {
-      const j = Math.min(k + merge.group - 1, merge.end);
-      total += 1;
-      k = j + 1;
-    }
-    return { items: out, total };
-  }, [merge.prefix, merge.start, merge.end, merge.group, merge.ext]);
+    // pad>0 → เติมศูนย์ N หลัก · pad<=0 → ไม่เติม (เลขดิบ)
+    const pad = (n: number) => (merge.pad > 0 ? String(n).padStart(merge.pad, '0') : String(n));
+    const items = ranges.slice(0, 4).map(([a, b]) => `${merge.prefix}${pad(a)}-${pad(b)}.${merge.ext}`);
+    return { items, total: ranges.length };
+  }, [merge.prefix, merge.start, merge.end, merge.group, merge.ext, merge.pad]);
+
+  // ปลายทาง: ถ้า user เลือกเอง (merge.dstDir) ใช้ตามนั้น, ไม่งั้น default `<srcDir>_merged`
+  const defaultDst = merge.srcDir ? `${merge.srcDir}_merged` : '';
+  const effectiveDst = merge.dstDir || defaultDst;
+
+  const onPickDst = async () => {
+    const dir = await window.inktts.fs.chooseFolder({
+      defaultPath: merge.dstDir || merge.srcDir || outputDir,
+      title: 'เลือกโฟลเดอร์ปลายทาง (ไฟล์รวม)',
+    });
+    if (!dir) return;
+    setMerge({ dstDir: dir });
+  };
+  const resetDst = () => setMerge({ dstDir: null });
 
   const onStart = async () => {
     if (!merge.srcDir) {
@@ -89,7 +103,7 @@ export function MergePanel() {
     setStatus({ kind: 'run', message: 'กำลังรวมไฟล์เสียง...' });
     const result = await window.inktts.merge.start({
       srcDir: merge.srcDir,
-      dstDir: `${merge.srcDir}_merged`,
+      dstDir: effectiveDst || `${merge.srcDir}_merged`,
       // merge ไม่ดูชื่อไฟล์ต้นทาง — แค่นับไฟล์ + เรียงตามชื่อ (natural sort) แล้วแบ่งกลุ่ม
       // outPrefix = ช่องที่ผู้ใช้พิมพ์ ใช้ตั้งชื่อไฟล์ผลลัพธ์อย่างเดียว · start = เลขเริ่มของชื่อ
       outPrefix: merge.prefix,
@@ -97,6 +111,7 @@ export function MergePanel() {
       end: merge.end,
       group: merge.group,
       ext: merge.ext,
+      pad: merge.pad,
     });
     if (!result.ok) {
       setMerge({ running: false });
@@ -106,11 +121,9 @@ export function MergePanel() {
   };
 
   const onOpenOutput = () => {
-    if (!merge.srcDir) return;
-    window.inktts.fs.revealFolder(`${merge.srcDir}_merged`);
+    if (!effectiveDst) return;
+    window.inktts.fs.revealFolder(effectiveDst);
   };
-
-  const dstHint = merge.srcDir ? `${merge.srcDir}_merged` : '(เลือกโฟลเดอร์ต้นทางก่อน)';
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -155,33 +168,47 @@ export function MergePanel() {
 
           <FieldRow label="ตั้งแต่ตอน — ถึงตอน">
             <div className="flex items-center gap-2">
-              <Input
-                type="number"
+              <NumberField
                 className="w-28"
                 value={merge.start}
                 min={1}
-                onChange={(e) => setMerge({ start: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+                onChange={(n) => setMerge({ start: n })}
               />
               <span className="text-[12px] text-vscode-fg-dim">ถึง</span>
-              <Input
-                type="number"
+              <NumberField
                 className="w-28"
                 value={merge.end}
                 min={1}
-                onChange={(e) => setMerge({ end: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+                onChange={(n) => setMerge({ end: n })}
               />
             </div>
           </FieldRow>
 
           <FieldRow label="จัดกลุ่มละ (ตอน)">
-            <Input
-              type="number"
+            <NumberField
               className="w-28"
               value={merge.group}
               min={1}
               max={1000}
-              onChange={(e) => setMerge({ group: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+              onChange={(n) => setMerge({ group: n })}
             />
+          </FieldRow>
+
+          <FieldRow label="เติมศูนย์เลขตอน (หลัก)">
+            <div className="flex items-center gap-2 w-full">
+              <NumberField
+                className="w-24"
+                value={merge.pad}
+                min={0}
+                max={8}
+                onChange={(n) => setMerge({ pad: n })}
+              />
+              <span className="text-[11px] text-vscode-fg-dim truncate">
+                {merge.pad === 0 ? 'ไม่เติมศูนย์ (เช่น 1-100)' : `${merge.pad} หลัก`}
+                {' · ค่าเริ่มต้น 4 หลัก · ใส่ 0 = ไม่เติม'}
+                {merge.detected?.pad ? ` · ตรวจจากไฟล์ต้นทาง: ${merge.detected.pad} หลัก` : ''}
+              </span>
+            </div>
           </FieldRow>
 
           <FieldRow label="นามสกุล">
@@ -202,9 +229,26 @@ export function MergePanel() {
             </div>
           )}
 
+          <FieldRow label="โฟลเดอร์ปลายทาง (ไฟล์รวม)">
+            <div className="flex items-center gap-2 w-full">
+              <AppButton tone="zinc" variant="chrome" onClick={onPickDst}>
+                <Codicon name="folder" size={13} />
+                เลือก
+              </AppButton>
+              <span className="text-[11px] text-vscode-fg-dim truncate flex-1" title={effectiveDst}>
+                {effectiveDst || '(เลือกโฟลเดอร์ต้นทางก่อน)'}
+              </span>
+              {merge.dstDir && (
+                <AppButton tone="zinc" variant="icon" onClick={resetDst} title={`รีเซ็ตเป็นค่าเริ่มต้น (${defaultDst})`}>
+                  <Codicon name="discard" size={14} />
+                </AppButton>
+              )}
+            </div>
+          </FieldRow>
+
           <div className="text-[12px] text-vscode-fg-dim flex items-center gap-2 pt-1">
             <Codicon name="output" size={14} />
-            <span>ไฟล์รวมจะอยู่ที่:  {dstHint}</span>
+            <span>ไฟล์รวมจะอยู่ที่:  {effectiveDst || '(เลือกโฟลเดอร์ต้นทางก่อน)'}{merge.dstDir ? ' · กำหนดเอง' : ' · ค่าเริ่มต้น'}</span>
           </div>
 
           <div className="flex items-center gap-2 pt-3">

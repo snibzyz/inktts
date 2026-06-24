@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { FieldDef } from '@/types/inktts';
 import { Input, Select } from '@/ui/Input';
+import { useNumberDraft } from '@/ui/NumberField';
 import { Codicon } from '@/ui/Codicon';
 import { cn } from '@/ui/cn';
 
@@ -224,7 +225,7 @@ export function RateStepper({
         type="text"
         className="flex-1 h-10 text-center bg-vscode-input border-y border-vscode-input-border text-vscode-fg-bright text-[13px] font-medium tabular-nums focus:outline-none focus:border-vscode-focus min-w-0"
         value={draft}
-        onFocus={(e) => { setEditing(true); e.target.select(); }}
+        onFocus={() => { setEditing(true); }}
         onBlur={commitDraft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
@@ -259,6 +260,8 @@ export function RateStepper({
 
 export function Spinbox({ value, min, max, onChange, width = 110 }: { value: number; min: number; max: number; onChange: (v: number) => void; width?: number }) {
   const clamp = (n: number) => Math.max(min, Math.min(max, n));
+  // ช่องกลางใช้ draft pattern → ลบให้ว่างได้ ไม่เด้งกลับเป็น min ระหว่างพิมพ์
+  const { inputProps } = useNumberDraft(value, onChange, { min, max });
   return (
     <div className="inline-flex items-stretch text-[13px]" style={{ width }}>
       <button
@@ -270,15 +273,8 @@ export function Spinbox({ value, min, max, onChange, width = 110 }: { value: num
         <Codicon name="chevron-down" size={14} />
       </button>
       <input
-        type="number"
+        {...inputProps}
         className="flex-1 h-10 text-center bg-vscode-input border-y border-vscode-input-border text-vscode-fg text-[13px] focus:outline-none focus:border-vscode-focus min-w-0"
-        value={value}
-        min={min}
-        max={max}
-        onChange={(e) => {
-          const n = parseInt(e.target.value, 10);
-          if (Number.isFinite(n)) onChange(clamp(n));
-        }}
       />
       <button
         type="button"

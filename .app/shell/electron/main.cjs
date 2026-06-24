@@ -9,6 +9,7 @@ if (app.isPackaged && process.resourcesPath) {
 const { registerWindowIpc } = require('./ipc/window.cjs');
 const { registerFsIpc } = require('./ipc/fs.cjs');
 const { registerTtsIpc } = require('./ipc/tts.cjs');
+const { registerQueueIpc } = require('./ipc/queue.cjs');
 const { registerSettingsIpc } = require('./ipc/settings.cjs');
 const autoUpdate = require('./autoUpdate.cjs');
 const { createLogger } = require('./helpers/logger.cjs');
@@ -107,6 +108,7 @@ app.whenReady().then(() => {
   registerWindowIpc(() => mainWindow);
   registerFsIpc(() => mainWindow);
   registerTtsIpc(() => mainWindow);
+  registerQueueIpc(() => mainWindow);
   registerSettingsIpc();
   autoUpdate.registerIpc();
 
