@@ -1,6 +1,6 @@
 // Bridge ที่ preload exposes ไปบน window.inktts
 
-export type ServiceKey = 'edge' | 'google' | 'rv';
+export type ServiceKey = 'edge' | 'google' | 'rv' | 'bing';
 
 export type FieldKind = 'combo' | 'entry' | 'spinbox' | 'scale' | 'rate';
 
@@ -37,6 +37,8 @@ export interface ServiceDef {
   name: string;
   title: string;
   subtitle: string;
+  /** แสดงป้าย "ใหม่" ที่ sidebar / หัวหน้าบริการ */
+  isNew?: boolean;
   outputSubdir: string;
   maxTotal: number;
   presets: PresetDef[];

@@ -114,10 +114,12 @@ flowchart TD
     Service -->|เสียงดีสุด| Edge["Microsoft Edge<br/>เสียง Premwadee หรือ Niwat"]
     Service -->|เสถียรที่สุด| Google["Google Translate"]
     Service -->|เลือกเพศได้| RV["ResponsiveVoice"]
+    Service -->|ตอน Edge ช้า| Bing["Bing<br/>เสียง Premwadee เดียวกับ Edge"]
 
     Edge --> Files["เลือกโฟลเดอร์<br/>หรือไฟล์เฉพาะที่จะแปลง"]
     Google --> Files
     RV --> Files
+    Bing --> Files
 
     Files --> Preset["เลือกพรีเซตความเร็ว<br/>ค่าเริ่มต้น สูงสุด"]
     Preset --> Run["กดเริ่มแปลงเสียง"]
@@ -134,7 +136,7 @@ flowchart TD
     classDef done fill:#d1fae5,stroke:#059669,stroke-width:2px,color:#064e3b
 
     class Drop,Pick,Files,Preset,Run,Adapt,Progress step
-    class Edge,Google,RV service
+    class Edge,Google,RV,Bing service
     class Result result
     class Optional done
 ```
@@ -143,15 +145,16 @@ flowchart TD
 
 ---
 
-## 3 บริการเสียง — เลือกใช้ตัวไหนดี
+## 4 บริการเสียง — เลือกใช้ตัวไหนดี
 
-INKTTS มี 3 บริการเสียงฟรีให้เลือก สลับกันได้ตามต้องการ
+INKTTS มี 4 บริการเสียงฟรีให้เลือก สลับกันได้ตามต้องการ
 
 | บริการ | คุณภาพเสียง | ความเสถียร | ใช้เมื่อ |
 |---|:---:|:---:|---|
 | **Microsoft Edge** | ดีเยี่ยม | กลาง | อยากได้เสียงธรรมชาติที่สุด (แนะนำเริ่มจากตัวนี้) |
 | **Google Translate** | ปานกลาง | สูงที่สุด | แปลงไฟล์เยอะ ๆ ติดต่อกัน · กลัวพลาด |
 | **ResponsiveVoice** | ปานกลาง | กลาง | อยากเลือกเพศชาย/หญิงได้ |
+| **Bing** (ใหม่) | ดี (16 kHz) | สูง | Edge ช้า/ค้าง — ได้เสียง Premwadee เดิมแต่เร็วกว่า |
 
 ### Microsoft Edge — เสียง Premwadee Neural
 
@@ -171,6 +174,13 @@ INKTTS มี 3 บริการเสียงฟรีให้เลือ�
 
 - เลือกได้ทั้งเสียงชาย/หญิง
 - ตั้งความเร็วได้ 2 ระดับ: "ความเร็วเสียง" (ตอนเล่น) และ "ความเร็วของ API" (ตอนสร้าง)
+
+### Bing — เสียง Premwadee เดียวกับ Edge (ใหม่)
+
+- เสียงเดียวกับ Edge: **Premwadee** (หญิง) · **Niwat** (ชาย) · ตั้งความเร็วแบบเดียวกับ Edge (`+30%`)
+- ส่งผ่าน Bing Translator — ตอบประโยคละ ~2 วินาที ใช้แทนตอน Edge ช้าฝั่ง Microsoft
+- คุณภาพต่ำกว่า Edge เล็กน้อย (16 kHz เทียบ 24 kHz) · ไฟล์อยู่ที่ `output/bing/`
+- พรีเซตเริ่มต้น "แนะนำ" = 10 คำขอพร้อมกัน (ไม่เจอ error) · "เร็ว" = 24 (อาจเจอ error บ้าง ระบบลองใหม่ให้เอง)
 
 > ไม่แน่ใจเลือกอะไร เริ่มที่ **Microsoft Edge** ก่อน — ถ้าโดน rate limit ค่อยสลับไป Google
 

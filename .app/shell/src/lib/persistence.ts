@@ -30,7 +30,7 @@ export async function hydrate() {
   const cur = useStore.getState();
 
   // services
-  for (const key of ['edge', 'google', 'rv'] as ServiceKey[]) {
+  for (const key of ['edge', 'google', 'rv', 'bing'] as ServiceKey[]) {
     const saved = s.services?.[key];
     if (saved && typeof saved === 'object') {
       cur.updateService(key, {
@@ -47,7 +47,7 @@ export async function hydrate() {
   }
 
   // view
-  if (s.view && ['edge', 'google', 'rv', 'merge', 'settings'].includes(s.view)) {
+  if (s.view && ['edge', 'google', 'rv', 'bing', 'merge', 'settings'].includes(s.view)) {
     cur.setView(s.view as any);
   }
 
@@ -73,6 +73,7 @@ function persistNow() {
       edge: pickServicePersist(st.services.edge),
       google: pickServicePersist(st.services.google),
       rv: pickServicePersist(st.services.rv),
+      bing: pickServicePersist(st.services.bing),
     },
     view: st.view,
     merge: {
@@ -101,6 +102,7 @@ export function startAutosave() {
         edge: pickServicePersist(state.services.edge),
         google: pickServicePersist(state.services.google),
         rv: pickServicePersist(state.services.rv),
+        bing: pickServicePersist(state.services.bing),
       },
       view: state.view,
       merge: { srcDir: state.merge.srcDir, prefix: state.merge.prefix, group: state.merge.group, ext: state.merge.ext, pad: state.merge.pad },

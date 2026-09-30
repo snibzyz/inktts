@@ -2,7 +2,7 @@
 // a single .m4a file for one engine on a single short input.
 //
 // Usage:
-//   node electron/tts/__smoke.cjs <edge|google|rv> [input_basename]
+//   node electron/tts/__smoke.cjs <edge|google|rv|bing> [input_basename]
 // Default input: "input/ติดหนี้สามสิบล้าน 401.txt" (truncated to 200 chars for speed)
 
 const fs = require('node:fs');
@@ -99,6 +99,7 @@ async function main() {
         tempo: 1.0, lang: 'th', jitter: 0,
       };
       if (service === 'edge') return { ...base, voice: 'th-TH-PremwadeeNeural', rate: '+30%', linesPerChunk: 1 };
+      if (service === 'bing') return { ...base, voice: 'th-TH-PremwadeeNeural', rate: '+30%', linesPerChunk: 1 };
       if (service === 'google') return { ...base, chunkChars: 120 };
       if (service === 'rv') return { ...base, gender: 'female', rate: 0.5, chunkChars: 100 };
       return base;

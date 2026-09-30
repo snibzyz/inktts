@@ -172,6 +172,8 @@ export const useStore = create<AppState>((set, get) => ({
     edge: initialServiceState(0, 50, 1, { voice: 'th-TH-PremwadeeNeural', rate: '+0%', 'lines-per-chunk': 1 }),
     google: initialServiceState(0, 10, 2, { tempo: 1.3, 'chunk-chars': 120, jitter: 0.1 }),
     rv: initialServiceState(0, 8, 1, { gender: 'female', tempo: 1.3, rate: 0.5, 'chunk-chars': 100 }),
+    // Bing เริ่มที่ preset "แนะนำ" (index 1 = 10 คำขอพร้อมกัน) ไม่ใช่ MAX — 24 เริ่มเจอ HTTP 500
+    bing: initialServiceState(1, 5, 2, { voice: 'th-TH-PremwadeeNeural', rate: '+0%', 'lines-per-chunk': 1 }),
   },
 
   updateService: (key, patch) =>

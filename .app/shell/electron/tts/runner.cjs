@@ -9,12 +9,13 @@ const { ffmpegConcat } = require('./ffmpeg.cjs');
 const edge = require('./edge.cjs');
 const google = require('./google.cjs');
 const rv = require('./responsivevoice.cjs');
+const bing = require('./bing.cjs');
 const { getServiceCacheDir } = require('../helpers/paths.cjs');
 const { createLogger } = require('../helpers/logger.cjs');
 
 const runnerLog = createLogger('runner');
 
-const ENGINES = { edge, google, rv };
+const ENGINES = { edge, google, rv, bing };
 
 const safeInt = (v, fallback) => {
   const n = Number(v);

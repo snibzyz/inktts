@@ -5,7 +5,7 @@ import { Codicon } from '@/ui/Codicon';
 import { cn } from '@/ui/cn';
 import { formatClock, formatDuration, formatEta, estimateRemaining } from '@/lib/formatTime';
 
-const SERVICE_LABEL: Record<string, string> = { edge: 'Edge', google: 'Google', rv: 'ResponsiveVoice' };
+const SERVICE_LABEL: Record<string, string> = { edge: 'Edge', google: 'Google', rv: 'ResponsiveVoice', bing: 'Bing (Premwadee)' };
 
 const STATUS: Record<string, { icon: string; color: string; label: string; spin?: boolean; barColor: string }> = {
   idle: { icon: 'circle-large-outline', color: 'text-vscode-muted', label: 'พร้อม', barColor: 'bg-vscode-muted/30' },

@@ -5,9 +5,9 @@
 //   {
 //     "version": 1,
 //     "paths": { "inputDir": null|string, "outputDir": null|string },
-//     "services": { edge: {...}, google: {...}, rv: {...} },
+//     "services": { edge: {...}, google: {...}, rv: {...}, bing: {...} },
 //     "merge": { srcDir, prefix, group, ext },
-//     "view": 'edge' | 'google' | 'rv' | 'merge' | 'settings'
+//     "view": 'edge' | 'google' | 'rv' | 'bing' | 'merge' | 'settings'
 //   }
 //
 // ค่า null ใน paths = ใช้ default (ข้าง .exe หรือ workspace dir)
@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS = {
     edge: null,
     google: null,
     rv: null,
+    bing: null,
   },
   merge: null,
   view: 'edge',

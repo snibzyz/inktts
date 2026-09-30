@@ -11,7 +11,7 @@ import { Input, Select } from '@/ui/Input';
 import { cn } from '@/ui/cn';
 import { formatClock } from '@/lib/formatTime';
 
-const SERVICE_LABEL: Record<string, string> = { edge: 'Edge', google: 'Google', rv: 'ResponsiveVoice' };
+const SERVICE_LABEL: Record<string, string> = { edge: 'Edge', google: 'Google', rv: 'ResponsiveVoice', bing: 'Bing (Premwadee)' };
 
 interface FormState {
   editingId: string | null;
@@ -75,7 +75,7 @@ export function QueuePanel() {
   }, [items, now]);
 
   const onChangeService = (service: ServiceKey) =>
-    setForm((f) => ({ ...f, service, presetIdx: 0, fieldValues: defaultFieldValues(service) }));
+    setForm((f) => ({ ...f, service, presetIdx: getService(service).defaultPreset, fieldValues: defaultFieldValues(service) }));
 
   const onPickInputFolder = async () => {
     const dir = await window.inktts.fs.chooseFolder({ defaultPath: form.inputDir, title: 'เลือกโฟลเดอร์ต้นทาง (.txt)' });

@@ -27,6 +27,15 @@ const RV_PRESETS = [
   { label: 'ช้าแต่ปลอดภัย', batch: 3, conn: 1 },
 ];
 
+// Bing: นับเป็นคำขอรวม (batch × conn) — จาก IP เดียว ~10 พร้อมกันไม่เจอ error, ~40 เริ่มเจอ HTTP 500
+// ค่าเริ่มต้น = index 1 (10 พร้อมกัน) · index 0 = เร็ว 24 (อาจเจอ 500 บ้าง engine ลองใหม่ให้เอง)
+const BING_PRESETS = [
+  { label: 'เร็ว (24 คำขอพร้อมกัน)', batch: 12, conn: 2 },
+  { label: 'แนะนำ (10 คำขอพร้อมกัน)', batch: 5, conn: 2 },
+  { label: 'ไฟล์เดียว — เร็วต่อไฟล์', batch: 1, conn: 10 },
+  { label: 'ช้าแต่ปลอดภัย (4 คำขอพร้อมกัน)', batch: 4, conn: 1 },
+];
+
 const maxTotalOf = (presets: { batch: number; conn: number }[]) =>
   Math.max(...presets.map((p) => p.batch * p.conn));
 
@@ -97,6 +106,31 @@ export const SERVICES: ServiceDef[] = [
       // ความเร็วฝั่ง API — คนละ concept จาก playback speed ของผู้ใช้
       { name: 'rate', kind: 'rate', label: 'ความเร็วฝั่งบริการ', default: 0.5, min: 0.1, max: 1.5, step: 0.1, unit: '', advanced: true },
       { name: 'chunk-chars', kind: 'spinbox', label: 'ตัวอักษรต่อส่วน', default: 100, min: 50, max: 100, advanced: true },
+    ],
+  },
+  {
+    key: 'bing',
+    icon: 'zap',
+    name: 'Bing',
+    title: 'Bing (Premwadee) — เสียงเดียวกับ Edge',
+    subtitle: 'เสียง Premwadee เดียวกับ Edge · เร็วกว่าตอน Edge ช้า · คุณภาพ 16 kHz',
+    isNew: true,
+    outputSubdir: 'bing',
+    maxTotal: maxTotalOf(BING_PRESETS),
+    presets: BING_PRESETS,
+    defaultPreset: 1,
+    fields: [
+      {
+        name: 'voice',
+        kind: 'combo',
+        label: 'เสียงพากย์',
+        default: 'th-TH-PremwadeeNeural',
+        options: ['th-TH-PremwadeeNeural', 'th-TH-NiwatNeural'],
+        optionLabels: ['Premwadee (หญิง)', 'Niwat (ชาย)'],
+      },
+      // ส่งเป็น prosody rate แบบเดียวกับ Edge ("+30%")
+      { name: 'rate', kind: 'rate', label: 'ความเร็วเสียง', default: 0, min: -50, max: 100, step: 5, unit: '%' },
+      { name: 'lines-per-chunk', kind: 'spinbox', label: 'จำนวนบรรทัดต่อส่วนเสียง', default: 1, min: 1, max: 50, advanced: true },
     ],
   },
 ];

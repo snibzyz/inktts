@@ -2,11 +2,13 @@ import { useStore, type ViewKey } from '@/state/store';
 import { SERVICES } from '@/lib/services';
 import { Codicon } from '@/ui/Codicon';
 import { cn } from '@/ui/cn';
+import { NewBadge } from './NewBadge';
 
 const ICONS: Record<string, string> = {
   edge: 'star-full',
   google: 'globe',
   rv: 'mic',
+  bing: 'zap',
   queue: 'list-ordered',
   merge: 'combine',
 };
@@ -30,6 +32,7 @@ export function Sidebar() {
           active={view === s.key}
           icon={ICONS[s.key]}
           label={s.name}
+          isNew={s.isNew}
           onClick={() => setView(s.key as ViewKey)}
         />
       ))}
@@ -89,7 +92,7 @@ function SectionLabel({ children, className = '' }: { children: React.ReactNode;
   );
 }
 
-function NavItem({ active, icon, label, onClick }: { active: boolean; icon: string; label: string; onClick: () => void }) {
+function NavItem({ active, icon, label, isNew, onClick }: { active: boolean; icon: string; label: string; isNew?: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -103,6 +106,7 @@ function NavItem({ active, icon, label, onClick }: { active: boolean; icon: stri
     >
       <Codicon name={icon} size={16} className={active ? 'text-vscode-focus' : 'text-vscode-fg-dim'} />
       <span>{label}</span>
+      {isNew && <NewBadge className="ml-auto" />}
     </button>
   );
 }

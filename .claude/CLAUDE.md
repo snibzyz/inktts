@@ -2,7 +2,7 @@
 
 INKTTS เป็น **เครื่องมือ batch TTS ภาษาไทย** ในตระกูลเดียวกับ INKIDEA / INKCRAW
 สร้างบน Electron + React + TypeScript + Vite + Tailwind
-แปลงไฟล์ `.txt` เป็นเสียง `.m4a` ผ่านบริการฟรี 3 ตัว (Edge / Google / ResponsiveVoice)
+แปลงไฟล์ `.txt` เป็นเสียง `.m4a` ผ่านบริการฟรี 4 ตัว (Edge / Google / ResponsiveVoice / Bing)
 ไม่ต้องใช้ API key, ไม่ต้องลง Python หรือ ffmpeg แยก (ฝัง ffmpeg-static เข้ามา)
 
 > เคยเป็น Python + CustomTkinter (อยู่ใน `.old/`) — port มาเป็น Electron แล้วใน 2026-05
@@ -37,11 +37,13 @@ INKTTS/
 │       │   │   ├── edge.cjs      ← Edge TTS (msedge-tts)
 │       │   │   ├── google.cjs    ← Google Translate TTS (HTTP)
 │       │   │   ├── responsivevoice.cjs ← RV TTS (HTTP + key scrape)
+│       │   │   ├── bing.cjs      ← Bing engine (retry ในตัว + atomic write)
+│       │   │   ├── bingTts.cjs   ← Bing Translator client (session/token + tfettts)
 │       │   │   └── merge.cjs     ← merge_groups port
 │       │   ├── helpers/
 │       │   │   ├── logger.cjs    ← file + console logger
 │       │   │   └── paths.cjs     ← appRoot/input/output/cache/ffmpeg
-│       │   └── __tests__/        ← smoke-tts.cjs / smoke-merge.cjs
+│       │   └── __tests__/        ← smoke-*.cjs (node) + *.test.mjs (vitest: `pnpm test`)
 │       └── src/                  ← renderer (React)
 │           ├── App.tsx
 │           ├── main.tsx
@@ -79,7 +81,7 @@ INKTTS/
 
 ## 4. TTS Engine Architecture
 
-3 engines ในโฟลเดอร์ `electron/tts/` — แต่ละตัว export:
+4 engines ในโฟลเดอร์ `electron/tts/` (ลงทะเบียนใน `ENGINES` ของ `runner.cjs`) — แต่ละตัว export:
 ```js
 {
   fetchChunk: async ({ text, outPath, ...opts }) => void,
@@ -93,6 +95,12 @@ INKTTS/
 **Edge** — ใช้ `msedge-tts` (WebSocket) — voice/rate options. ไม่ต้อง split โดย char limit (รับยาวได้)
 **Google** — HTTP GET `translate.google.com/translate_tts?...` ผ่าน Electron `net.request` — UA rotation + jitter
 **ResponsiveVoice** — HTTP GET พร้อม scrape live key จาก homepage (fallback keys: b08U7IYJ, FQ9r4hgY, HY7lTyiS) — char limit 100/chunk
+**Bing** (เพิ่ม 30-09-2026) — เสียง Premwadee/Niwat ผ่าน Bing Translator (`bing.com/tfettts`) — ใช้ตอน Edge ช้าฝั่ง Microsoft
+- `bingTts.cjs`: GET `bing.com/translator` → แกะ `IG` / `data-iid` / `params_AbusePreventionHelper=[key,"token",ttl]` + cookie → POST `tfettts` (ssml/token/key) · 401/403/429 → ทิ้ง session ขอใหม่ · global fetch (ไม่มี proxy)
+- `bing.cjs`: ลองใหม่ในตัวสูงสุด 8 ครั้ง เว้น 200ms (HTTP 5xx / timeout / too-small / เส้นหลุด) · session error พัก 1.5 วิ · HTTP 400 โยนทันที · งบรวม 50 วิ (< runner attempt timeout 60 วิ) · byte floor 60 bytes/ตัวอักษร (ไม่มี WordBoundary)
+- splitter แบบบรรทัดเหมือน Edge · คุณภาพ mp3 16 kHz 32 kbps · จาก IP เดียว ~10 พร้อมกันไม่เจอ error, ~40 เจอ HTTP 500 ~11% → พรีเซตเริ่มต้น index 1 = 10 · "เร็ว" = 24
+- ไม่ใช่ API ทางการ — ถ้าหน้า translator เปลี่ยน `parseSessionPage` จะคืน null → error "เปิด session ไม่ได้"
+
 **Common** — chunks เป็น .mp3 → ffmpeg concat → .m4a (AAC 128k)
 
 **Runner** (`runner.cjs`):
@@ -138,7 +146,8 @@ repo info: `process.env.INKTTS_REPO` หรือ default `snibzyz/inktts`
 - **Build**: `pnpm build` — Vite production build → `dist/`
 - **Package**: `pnpm package:win` → `release/INKTTS-Portable-<v>.exe`
 - **Smoke test**:
-  - `pnpm smoke:tts edge|google|rv` — รัน engine ตรง ๆ บน 200-char sample → ตรวจว่าได้ `.m4a` > 1KB
+  - `pnpm test` — vitest (`electron/__tests__/*.test.mjs`)
+  - `pnpm smoke:tts edge|google|rv|bing` — รัน engine ตรง ๆ บน 200-char sample → ตรวจว่าได้ `.m4a` > 1KB
   - `pnpm smoke:merge` — รัน merge บน `output/edge/*.m4a` ที่มีอยู่แล้ว
   - `pnpm smoke:queue [edge,google,rv]` — full queue test: รันคิวจริงผ่านทุก engine เรียงกัน → ตรวจ sequential + `.m4a` faststart + timing + persistence (default ครบ 3 engine)
 

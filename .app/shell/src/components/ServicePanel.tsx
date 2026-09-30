@@ -8,6 +8,7 @@ import { Codicon } from '@/ui/Codicon';
 import { AppButton } from '@/ui/AppButton';
 import { AppCard } from '@/ui/AppCard';
 import { cn } from '@/ui/cn';
+import { NewBadge } from './NewBadge';
 import { reportError } from '@/lib/errorBus';
 import { formatClock, formatDuration, formatEta } from '@/lib/formatTime';
 
@@ -17,6 +18,7 @@ const SERVICE_ICON: Record<string, string> = {
   edge: 'star-full',
   google: 'globe',
   rv: 'mic',
+  bing: 'zap',
 };
 
 export function ServicePanel({ serviceKey }: Props) {
@@ -450,7 +452,10 @@ export function ServicePanel({ serviceKey }: Props) {
       <header className="px-6 pt-6 pb-5 border-b border-vscode-border flex items-start gap-3.5 flex-none">
         <Codicon name={SERVICE_ICON[serviceKey] || 'star'} size={26} className="text-vscode-focus mt-1" />
         <div>
-          <div className="text-[20px] font-semibold text-vscode-fg-bright leading-tight">{svc.title}</div>
+          <div className="text-[20px] font-semibold text-vscode-fg-bright leading-tight flex items-center gap-2">
+            <span>{svc.title}</span>
+            {svc.isNew && <NewBadge />}
+          </div>
           <div className="text-[13px] text-vscode-fg-dim mt-1">{svc.subtitle}</div>
         </div>
       </header>

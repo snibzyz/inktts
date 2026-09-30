@@ -281,7 +281,7 @@ export function SettingsPanel() {
           <div className="border-t border-vscode-border pt-2 space-y-1.5">
             <div className="text-[12px] text-vscode-fg-dim">ล้างเฉพาะบริการ:</div>
             <div className="flex items-center gap-2 flex-wrap">
-              {(['edge', 'google', 'rv'] as const).map((svc) => (
+              {(['edge', 'google', 'rv', 'bing'] as const).map((svc) => (
                 <ServiceClearButton key={svc} service={svc} onCleared={() => { refreshCache(); }} />
               ))}
             </div>
@@ -460,10 +460,10 @@ function VerifyRow({ label, value, ok }: { label: string; value: string; ok?: bo
   );
 }
 
-function ServiceClearButton({ service, onCleared }: { service: 'edge' | 'google' | 'rv'; onCleared: () => void }) {
+function ServiceClearButton({ service, onCleared }: { service: 'edge' | 'google' | 'rv' | 'bing'; onCleared: () => void }) {
   const [busy, setBusy] = useState(false);
   const [lastBytes, setLastBytes] = useState<number | null>(null);
-  const labels: Record<typeof service, string> = { edge: 'Edge', google: 'Google', rv: 'ResponsiveVoice' };
+  const labels: Record<typeof service, string> = { edge: 'Edge', google: 'Google', rv: 'ResponsiveVoice', bing: 'Bing' };
   const onClick = async () => {
     setBusy(true);
     try {
