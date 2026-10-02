@@ -2,6 +2,7 @@ const { ipcMain, dialog, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { getAppRoot, getInputDir, getOutputDir } = require('../helpers/paths.cjs');
+const { sortPathsNatural } = require('../helpers/naturalSort.cjs');
 
 function registerFsIpc(getMainWindow) {
   ipcMain.handle('fs:getAppRoot', () => ({
@@ -14,10 +15,9 @@ function registerFsIpc(getMainWindow) {
     const dir = (payload && payload.dir) || getInputDir();
     if (!fs.existsSync(dir)) return [];
     const entries = fs.readdirSync(dir, { withFileTypes: true });
-    return entries
+    return sortPathsNatural(entries
       .filter((e) => e.isFile() && e.name.toLowerCase().endsWith('.txt'))
-      .map((e) => path.join(dir, e.name))
-      .sort();
+      .map((e) => path.join(dir, e.name)));
   });
 
   ipcMain.handle('fs:listGlob', (_e, payload) => {
@@ -33,10 +33,9 @@ function registerFsIpc(getMainWindow) {
       return [];
     }
     if (!fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir, { withFileTypes: true })
+    return sortPathsNatural(fs.readdirSync(dir, { withFileTypes: true })
       .filter((e) => e.isFile() && e.name.toLowerCase().endsWith(`.${ext}`))
-      .map((e) => path.join(dir, e.name))
-      .sort();
+      .map((e) => path.join(dir, e.name)));
   });
 
   ipcMain.handle('fs:chooseFolder', async (_e, payload) => {
@@ -60,7 +59,8 @@ function registerFsIpc(getMainWindow) {
       ],
       title: payload?.title || 'เลือกไฟล์',
     });
-    return r.canceled ? [] : r.filePaths;
+    // dialog คืนตามลำดับที่คลิก ไม่ใช่ลำดับตอน → เรียงใหม่
+    return r.canceled ? [] : sortPathsNatural(r.filePaths);
   });
 
   ipcMain.handle('fs:revealFolder', async (_e, payload) => {

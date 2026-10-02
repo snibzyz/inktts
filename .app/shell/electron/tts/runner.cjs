@@ -12,6 +12,7 @@ const rv = require('./responsivevoice.cjs');
 const bing = require('./bing.cjs');
 const { getServiceCacheDir } = require('../helpers/paths.cjs');
 const { createLogger } = require('../helpers/logger.cjs');
+const { sortPathsNatural } = require('../helpers/naturalSort.cjs');
 
 const runnerLog = createLogger('runner');
 
@@ -41,7 +42,9 @@ class TTSJob {
   constructor({ jobId, serviceKey, files, options, onEvent }) {
     this.jobId = jobId;
     this.serviceKey = serviceKey;
-    this.files = files; // absolute paths
+    // absolute paths — เรียงตามตอนเสมอ (natural sort) ไม่ว่าผู้เรียกส่งมาลำดับไหน
+    // → ไฟล์ได้ slot ตามลำดับตอน 1, 2, … 10, 11 (ไม่ใช่ 1, 10, 100 … 109, 11)
+    this.files = sortPathsNatural(files);
     this.options = options;
     this.onEvent = onEvent || (() => {});
     this.cancelled = false;

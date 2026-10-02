@@ -9,9 +9,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { ffmpegConcatCopy } = require('./ffmpeg.cjs');
-
 // natural sort — "ตอน 2" ต้องมาก่อน "ตอน 10" (string sort ปกติจะได้ 10 ก่อน 2)
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const { compareNatural } = require('../helpers/naturalSort.cjs');
 
 // คืน list ชื่อไฟล์ที่นามสกุลตรง เรียงแบบ natural sort
 function listAudioFiles(srcDir, ext) {
@@ -27,7 +26,7 @@ function listAudioFiles(srcDir, ext) {
     // ข้าม macOS AppleDouble metadata files (._*) ที่ Finder สร้างบน exFAT/FAT32
     // ไฟล์พวกนี้ไม่มี audio data จริง ffmpeg จะฟ้อง "moov atom not found"
     .filter((f) => !f.startsWith('._'))
-    .sort((a, b) => collator.compare(a, b));
+    .sort(compareNatural);
 }
 
 // autodetect — best-effort เดาค่าเริ่มต้นให้ UI จากไฟล์แรก (หลังเรียงแล้ว)

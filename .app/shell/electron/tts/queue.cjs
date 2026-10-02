@@ -19,6 +19,7 @@ const path = require('node:path');
 const { app } = require('electron');
 const { TTSJob } = require('./runner.cjs');
 const { createLogger } = require('../helpers/logger.cjs');
+const { compareNatural, sortPathsNatural } = require('../helpers/naturalSort.cjs');
 
 const log = createLogger('queue');
 
@@ -129,18 +130,21 @@ function recordFileTime(item, base) {
   const arr = item.times || (item.times = []);
   const existing = arr.find((t) => t.base === base);
   if (existing) existing.sec = sec;
-  else arr.push({ base, sec });
+  else {
+    arr.push({ base, sec });
+    // ไฟล์เสร็จไม่ตรงลำดับ (ทำหลายไฟล์พร้อมกัน) → เรียงตามตอนให้อ่านง่ายในมุมมองกาง
+    arr.sort((a, b) => compareNatural(a.base, b.base));
+  }
   delete item._fileStart[base];
 }
 
-// list ไฟล์ .txt ในโฟลเดอร์ (เรียงตามชื่อ)
+// list ไฟล์ .txt ในโฟลเดอร์ (เรียงตามตอนแบบ natural sort — 2 มาก่อน 10)
 function listTxt(dir) {
   try {
     if (!dir || !fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir, { withFileTypes: true })
+    return sortPathsNatural(fs.readdirSync(dir, { withFileTypes: true })
       .filter((e) => e.isFile() && e.name.toLowerCase().endsWith('.txt'))
-      .map((e) => path.join(dir, e.name))
-      .sort();
+      .map((e) => path.join(dir, e.name)));
   } catch { return []; }
 }
 
@@ -148,10 +152,10 @@ function listTxt(dir) {
 // ถ้ามี inputFiles ใช้ตามนั้น (กรองเฉพาะ .txt ที่ยังอยู่จริง), ไม่งั้น list ทั้งโฟลเดอร์
 function resolveFiles(item) {
   if (Array.isArray(item.inputFiles) && item.inputFiles.length) {
-    return item.inputFiles.filter((f) => {
+    return sortPathsNatural(item.inputFiles.filter((f) => {
       try { return fs.statSync(f).isFile() && f.toLowerCase().endsWith('.txt'); }
       catch { return false; }
-    });
+    }));
   }
   return listTxt(item.inputDir);
 }
