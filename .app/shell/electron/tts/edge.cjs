@@ -2,8 +2,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { pointMsEdgeTTSEndpoint } = require('./edgeEndpoint.cjs');
+
 let MsEdgeTTS;
 try { ({ MsEdgeTTS } = require('msedge-tts')); } catch { MsEdgeTTS = null; }
+// endpoint เดิมของ lib ตอบ 403 ทุกเส้นตั้งแต่ 14-10-2026 — ดู edgeEndpoint.cjs
+if (MsEdgeTTS) pointMsEdgeTTSEndpoint(MsEdgeTTS);
 
 function rateToString(rate) {
   // accept "+30%", "-10%", "1.3x", number
