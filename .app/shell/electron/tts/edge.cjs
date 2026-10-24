@@ -6,7 +6,7 @@ const { pointMsEdgeTTSEndpoint } = require('./edgeEndpoint.cjs');
 
 let MsEdgeTTS;
 try { ({ MsEdgeTTS } = require('msedge-tts')); } catch { MsEdgeTTS = null; }
-// endpoint เดิมของ lib ตอบ 403 ทุกเส้นตั้งแต่ 14-10-2026 — ดู edgeEndpoint.cjs
+// endpoint/token เดิมของ lib ใช้ไม่ได้แล้ว (403 ตั้งแต่ 14-10-2026 · 200 ไม่ upgrade ตั้งแต่ 24-10-2026) — ดู edgeEndpoint.cjs
 if (MsEdgeTTS) pointMsEdgeTTSEndpoint(MsEdgeTTS);
 
 function rateToString(rate) {
