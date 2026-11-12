@@ -20,6 +20,57 @@ function encodeArgs(fmt) {
   return fmt === 'm4a' ? ['-c:a', 'aac', ...common] : ['-c:a', 'libmp3lame', ...common];
 }
 
+// เพดานที่เว็บรับโดยไม่แปลงซ้ำ (INKREALM src/lib/audio/m4aAudioProfile.ts UPLOAD_AUDIO_MAX_KBPS 64 · MAX_SAMPLE_RATE 32 kHz · โมโน)
+// เว็บวัดบิตเรตจาก "ขนาดไฟล์ × 8 ÷ ความยาว" → ใช้บรรทัด "bitrate:" ของ ffmpeg (คิดแบบเดียวกัน) ก่อน · ไม่มีค่อยใช้ของสตรีม
+const WEB_MAX_KBPS = 64;
+const WEB_MAX_SAMPLE_RATE = 32000;
+
+/** อ่านสเปกเสียงจากข้อความ `ffmpeg -i <ไฟล์>` (stderr) — อ่านไม่ออก = null ในช่องนั้น */
+function parseAudioProbe(stderr) {
+  const text = String(stderr || '');
+  const stream = /Stream #\d+:\d+[^:]*: Audio: ([^\s,(]+)[^,]*, (\d+) Hz, ([^,]+),[^,\n]*(?:, (\d+) kb\/s)?/.exec(text);
+  const overall = /Duration: [^,]+, start: [^,]+, bitrate: (\d+) kb\/s/.exec(text) || /bitrate: (\d+) kb\/s/.exec(text);
+  if (!stream) return null;
+  const layout = stream[3].trim();
+  const channels = layout === 'mono' ? 1 : layout === 'stereo' ? 2 : Number((/^(\d+) channels?/.exec(layout) || [])[1]) || 2;
+  const kbps = overall ? Number(overall[1]) : stream[4] ? Number(stream[4]) : null;
+  return { codec: stream[1], sampleRate: Number(stream[2]), channels, kbps };
+}
+
+/** ไฟล์นี้เว็บรับได้เลยไหม (ไม่ต้องแปลงซ้ำบนเซิร์ฟเวอร์) */
+function withinWebStandard(p) {
+  return !!p && p.kbps != null && p.kbps <= WEB_MAX_KBPS && p.sampleRate <= WEB_MAX_SAMPLE_RATE && p.channels === 1;
+}
+
+async function probeAudio(file) {
+  const ffmpeg = getFfmpegPath();
+  if (!ffmpeg) return null;
+  const { stderr } = await run(ffmpeg, ['-hide_banner', '-nostdin', '-i', file]);
+  return parseAudioProbe(stderr);
+}
+
+/**
+ * ต่อไฟล์ชุดนี้แบบ -c copy ได้ไหม: ทุกไฟล์อยู่ในมาตรฐานเว็บ + สเปกเดียวกัน (codec · sample rate · ช่อง)
+ * ไม่งั้นต้องเข้ารหัสใหม่ — copy จะพาบิตเรตเกินไปทั้งก้อน หรือได้ไฟล์เพี้ยนเมื่อสเปกไม่ตรงกัน
+ * อ่านพร้อมกันทีละ 4 ไฟล์ · คืน { copy, reason, sample }
+ */
+async function canCopyConcat(files, concurrency = 4) {
+  const probes = new Array(files.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, files.length) }, async () => {
+    while (next < files.length) {
+      const i = next++;
+      probes[i] = await probeAudio(files[i]);
+    }
+  }));
+  const bad = probes.findIndex((p) => !withinWebStandard(p));
+  if (bad !== -1) return { copy: false, reason: 'over-standard', sample: { file: path.basename(files[bad]), probe: probes[bad] } };
+  const a = probes[0];
+  const mixed = probes.findIndex((p) => p.codec !== a.codec || p.sampleRate !== a.sampleRate || p.channels !== a.channels);
+  if (mixed !== -1) return { copy: false, reason: 'mixed-spec', sample: { file: path.basename(files[mixed]), probe: probes[mixed] } };
+  return { copy: true, reason: 'within-standard', sample: { probe: a } };
+}
+
 function run(cmd, args) {
   return new Promise((resolve) => {
     const t0 = Date.now();
@@ -47,7 +98,7 @@ function buildConcatLines(chunkPaths) {
     }
   }
   const escape = (p) => path.resolve(p).replace(/\\/g, '/').replace(/'/g, "'\\''");
-  return { lines: valid.map((p) => `file '${escape(p)}'`).join('\n'), validCount: valid.length, rejected };
+  return { lines: valid.map((p) => `file '${escape(p)}'`).join('\n'), validCount: valid.length, valid, rejected };
 }
 
 // Atomic output: ให้ ffmpeg เขียนไป tmp ก่อน → rename เป็น outputPath
@@ -72,7 +123,8 @@ function previewLines(text, head = 5, tail = 5) {
 // คืน { ok, error, details? } — error เป็น string สั้น ๆ บอกเหตุที่ fail
 // details = { reason, ffmpegPath, argv, listPreview, validChunks, rejectedSample, stderr, exitCode, durationMs, spawnError }
 // (ก่อนหน้านี้คืน bool → user เห็นแค่ "รวมเสียงพลาด" ไม่รู้ว่าเพราะอะไร)
-async function ffmpegConcat(chunkPaths, listPath, outputPath, fmt, tempo = 1.0) {
+// opts.reencode = บังคับเข้ารหัสใหม่ตามมาตรฐาน (merge ใช้เมื่อไฟล์ต้นทางเกินมาตรฐาน/สเปกไม่ตรงกัน)
+async function ffmpegConcat(chunkPaths, listPath, outputPath, fmt, tempo = 1.0, opts = {}) {
   const t0 = Date.now();
   const ffmpeg = getFfmpegPath();
   const stem = path.basename(outputPath, path.extname(outputPath));
@@ -95,7 +147,7 @@ async function ffmpegConcat(chunkPaths, listPath, outputPath, fmt, tempo = 1.0) 
     log.error('concat: ffmpeg not a regular file', { stem, ffmpeg, mode: ffmpegStat.mode });
     return { ok: false, error, details: { reason: 'ffmpeg-not-file', ffmpegPath: ffmpeg, mode: ffmpegStat.mode } };
   }
-  const { lines, validCount, rejected } = buildConcatLines(chunkPaths);
+  const { lines, validCount, valid, rejected } = buildConcatLines(chunkPaths);
   log.info('concat: prepare', {
     stem, ffmpeg, ffmpegSize: ffmpegStat.size, totalChunks: chunkPaths.length,
     validChunks: validCount, rejectedChunks: rejected.length,
@@ -117,8 +169,18 @@ async function ffmpegConcat(chunkPaths, listPath, outputPath, fmt, tempo = 1.0) 
   const outTmp = makeOutTmp(outputPath);
   const baseArgs = ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', listPath];
   const needsAtempo = Math.abs(tempo - 1.0) >= 0.001;
+  // mp3 ความเร็วปกติ = ต่อชิ้นแบบ copy (เร็ว ไม่เสียคุณภาพ) — เฉพาะเมื่อชิ้นจากเครื่องเสียงอยู่ในมาตรฐานเว็บ
+  // (Edge 48 kbps · Bing 32 kbps ผ่าน · เครื่องเสียงที่ส่งเกินมา = เข้ารหัสใหม่ 56 kbps) · ชิ้นมาจากเครื่องเสียงเดียวกัน อ่านชิ้นแรกพอ
+  let copy = fmt === 'mp3' && !needsAtempo && !opts.reencode;
+  if (copy) {
+    const first = await probeAudio(valid[0]);
+    if (!withinWebStandard(first)) {
+      copy = false;
+      log.info('concat: chunks over web standard — re-encode', { stem, probe: first });
+    }
+  }
   let args;
-  if (fmt === 'mp3' && !needsAtempo) {
+  if (copy) {
     args = [...baseArgs, '-c', 'copy', outTmp];
   } else {
     const codec = encodeArgs(fmt);
@@ -236,4 +298,7 @@ async function ffmpegConcatCopy(chunkPaths, listPath, outputPath) {
   return { ok: true };
 }
 
-module.exports = { ffmpegConcat, ffmpegConcatCopy, encodeArgs, EXPORT_KBPS, EXPORT_SAMPLE_RATE };
+module.exports = {
+  ffmpegConcat, ffmpegConcatCopy, encodeArgs, EXPORT_KBPS, EXPORT_SAMPLE_RATE,
+  parseAudioProbe, withinWebStandard, probeAudio, canCopyConcat, WEB_MAX_KBPS, WEB_MAX_SAMPLE_RATE,
+};

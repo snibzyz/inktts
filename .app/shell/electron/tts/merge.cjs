@@ -8,7 +8,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { ffmpegConcatCopy } = require('./ffmpeg.cjs');
+const { ffmpegConcat, ffmpegConcatCopy, canCopyConcat, EXPORT_KBPS } = require('./ffmpeg.cjs');
 // natural sort — "ตอน 2" ต้องมาก่อน "ตอน 10" (string sort ปกติจะได้ 10 ก่อน 2)
 const { compareNatural } = require('../helpers/naturalSort.cjs');
 
@@ -89,15 +89,27 @@ async function mergeGroups({ srcDir, dstDir, outPrefix, prefix, start, end, grou
     const listPath = path.join(dstDir, `.list-${n1}-${n2}.txt`);
     const groupFiles = chunk.map((name) => path.join(srcDir, name));
     let result = { ok: false, error: 'unknown' };
+    let reencoded = false;
     try {
-      result = await ffmpegConcatCopy(groupFiles, listPath, outPath);
+      // ไฟล์ต้นทางเกินมาตรฐานเว็บ (เช่น ไฟล์จาก INKTTS รุ่นเก่า 128k · ไฟล์จากโปรแกรมอื่น) หรือสเปกไม่ตรงกัน
+      // = เข้ารหัสใหม่ 56 kbps โมโน 24 kHz · อยู่ในมาตรฐานทุกไฟล์ = ต่อแบบ copy เหมือนเดิม (เร็ว ไม่เสียคุณภาพ) — 13-11-2026
+      const plan = await canCopyConcat(groupFiles);
+      if (plan.copy) {
+        result = await ffmpegConcatCopy(groupFiles, listPath, outPath);
+      } else {
+        reencoded = true;
+        const why = plan.reason === 'mixed-spec' ? 'สเปกไฟล์ไม่ตรงกัน' : 'ไฟล์ต้นทางเกินมาตรฐานเว็บ';
+        const p = plan.sample && plan.sample.probe;
+        log('info', `${outName}: ${why}${p ? ` (${plan.sample.file} ${p.kbps ?? '?'} kbps · ${p.sampleRate} Hz · ${p.channels === 1 ? 'โมโน' : 'สเตอริโอ'})` : ''} → ย่อเป็น ${EXPORT_KBPS} kbps`);
+        result = await ffmpegConcat(groupFiles, listPath, outPath, ext, 1.0, { reencode: true });
+      }
     } catch (err) {
       result = { ok: false, error: err && err.message };
     } finally {
       try { fs.unlinkSync(listPath); } catch { /* noop */ }
     }
     if (result.ok) {
-      log('ok', `${outName} (${chunk.length} files)`);
+      log('ok', `${outName} (${chunk.length} files${reencoded ? ` · ย่อเป็น ${EXPORT_KBPS} kbps` : ''})`);
       totalGroups += 1;
     } else {
       log('error', `${outName} failed — ${result.error}`);
