@@ -6,6 +6,20 @@ const { createLogger } = require('../helpers/logger.cjs');
 
 const log = createLogger('ffmpeg');
 
+/**
+ * มาตรฐานไฟล์เสียงของ INKREALM (13-11-2026 · Pete "แก้ inktts + release ได้เลย"):
+ * โมโน 24 kHz 56 kbps — เท่ากับตัวแปลงเสียงของเว็บ (INKREALM scripts/audio-transcode/lib/encodeProfile.mjs)
+ * และไม่เกินเพดานที่เว็บรับโดยไม่ต้องแปลงซ้ำ (≤ 64 kbps · ≤ 32 kHz · โมโน)
+ * เดิม 128 kbps → ไฟล์ใหญ่ 2 เท่า + เว็บต้องแปลงใหม่ทุกไฟล์ (prod 7 วัน แปลง 101,501 ไฟล์ · 802 → 517 GiB)
+ * เสียง TTS ต้นทาง Edge 24 kHz 48 kbps · Bing 16 kHz 32 kbps — 56 kbps ไม่ทำให้เสียงแย่ลง
+ */
+const EXPORT_KBPS = 56;
+const EXPORT_SAMPLE_RATE = 24000;
+function encodeArgs(fmt) {
+  const common = ['-ac', '1', '-ar', String(EXPORT_SAMPLE_RATE), '-b:a', `${EXPORT_KBPS}k`];
+  return fmt === 'm4a' ? ['-c:a', 'aac', ...common] : ['-c:a', 'libmp3lame', ...common];
+}
+
 function run(cmd, args) {
   return new Promise((resolve) => {
     const t0 = Date.now();
@@ -107,7 +121,7 @@ async function ffmpegConcat(chunkPaths, listPath, outputPath, fmt, tempo = 1.0) 
   if (fmt === 'mp3' && !needsAtempo) {
     args = [...baseArgs, '-c', 'copy', outTmp];
   } else {
-    const codec = fmt === 'm4a' ? ['-c:a', 'aac', '-b:a', '128k'] : ['-c:a', 'libmp3lame', '-b:a', '128k'];
+    const codec = encodeArgs(fmt);
     // m4a: ย้าย moov atom ไปต้นไฟล์ (faststart) → เล่น/สตรีมได้ทันทีไม่ต้องโหลดจบ
     // (mp3 ไม่มี moov atom — เว้นไว้ ไม่งั้น ffmpeg จะ error "Option movflags not found")
     const faststart = fmt === 'm4a' ? ['-movflags', '+faststart'] : [];
@@ -222,4 +236,4 @@ async function ffmpegConcatCopy(chunkPaths, listPath, outputPath) {
   return { ok: true };
 }
 
-module.exports = { ffmpegConcat, ffmpegConcatCopy };
+module.exports = { ffmpegConcat, ffmpegConcatCopy, encodeArgs, EXPORT_KBPS, EXPORT_SAMPLE_RATE };
